@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Controle de Pacientes</title>
+  <meta name="theme-color" content="#0f766e">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="icon.svg" alt="" width="28" height="28"><span>Controle de Pacientes</span></div>
+    <div class="user" id="user-box" hidden>
+      <span id="user-email"></span>
+      <button class="btn btn-ghost btn-sm" id="btn-sair" type="button">Sair</button>
+    </div>
+  </header>
+
+  <div id="aviso-demo" class="banner" hidden>
+    Modo demonstração: os dados ficam só neste navegador. Configure o Supabase em <code>config.js</code> para usar o banco on-line.
+  </div>
+
+  <section id="tela-login" class="login" hidden>
+    <form id="form-login" class="card login-card">
+      <h1>Entrar</h1>
+      <label>E-mail <input type="email" name="email" required autocomplete="username"></label>
+      <label>Senha <input type="password" name="senha" required autocomplete="current-password"></label>
+      <p class="erro" id="login-erro" hidden></p>
+      <button class="btn btn-primary" type="submit">Entrar</button>
+    </form>
+  </section>
+
+  <main id="tela-app" class="layout" hidden>
+    <aside class="painel-lista">
+      <div class="lista-topo">
+        <div class="lista-botoes">
+          <button class="btn btn-primary" id="btn-novo" type="button">+ Novo paciente</button>
+          <button class="btn btn-ghost" id="btn-imprimir" type="button" title="Visualizar e imprimir a lista de pacientes sem baixa">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Imprimir
+          </button>
+        </div>
+        <div class="segmento" role="radiogroup" aria-label="Filtrar por baixa">
+          <label><input type="radio" name="filtro-baixa" value="sem" checked><span>Sem baixa</span></label>
+          <label><input type="radio" name="filtro-baixa" value="com"><span>Com baixa</span></label>
+          <label><input type="radio" name="filtro-baixa" value="todos"><span>Todos</span></label>
+        </div>
+        <div class="filtros">
+          <input type="search" id="busca" placeholder="Buscar por nome, documento ou CID…" aria-label="Buscar paciente">
+          <select id="filtro-status" aria-label="Filtrar por situação">
+            <option value="">Qualquer situação</option>
+            <option value="Estável">Estável</option>
+            <option value="Melhorando">Melhorando</option>
+            <option value="Piorando">Piorando</option>
+            <option value="Crítico">Crítico</option>
+            <option value="Alta">Alta</option>
+            <option value="sem">Sem evolução</option>
+          </select>
+        </div>
+        <p class="contagem" id="contagem"></p>
+      </div>
+      <ul class="lista" id="lista"></ul>
+    </aside>
+    <section class="painel-detalhe" id="detalhe"></section>
+  </main>
+
+  <dialog id="dlg-paciente">
+    <form id="form-paciente" class="form">
+      <h2 id="dlg-titulo">Novo paciente</h2>
+      <div class="grid2">
+        <label class="span-all">Nome completo * <input name="nome" required></label>
+        <label>Data de nascimento <input type="date" name="data_nascimento"></label>
+        <label>Sexo
+          <select name="sexo">
+            <option value="">— não informado —</option>
+            <option value="F">Feminino</option>
+            <option value="M">Masculino</option>
+          </select>
+        </label>
+        <label>Telefone <input type="tel" name="telefone"></label>
+        <label>Documento (CPF, RG ou prontuário) <input name="documento"></label>
+        <label>Data de entrada * <input type="date" name="data_entrada" required></label>
+        <label>Data da baixa <input type="date" name="data_baixa">
+          <small class="dica">Preencha para encerrar o processo. Deixe vazio enquanto estiver em acompanhamento.</small>
+        </label>
+        <label id="campo-tipo-alta" hidden>Tipo de alta *
+          <select name="tipo_alta">
+            <option value="">— selecione —</option>
+            <option>Curado</option>
+            <option>Melhorado</option>
+            <option>A pedido</option>
+            <option>Evasão</option>
+            <option>Transferência</option>
+            <option>Óbito</option>
+            <option>Outro</option>
+          </select>
+        </label>
+        <label class="span-all">Motivo da entrada * <textarea name="motivo" rows="3" required></textarea></label>
+        <div class="campo span-all">
+          <span class="rotulo">CID de entrada (CID-10)</span>
+          <div class="cid-picker" id="cid-entrada"></div>
+          <small class="dica">Diagnóstico na admissão. O primeiro é o principal; os demais são registrados como comorbidades (já presentes na entrada).</small>
+        </div>
+        <label class="span-all">Observações <textarea name="observacoes" rows="2"></textarea></label>
+      </div>
+      <p class="erro" id="dlg-erro" hidden></p>
+      <div class="acoes">
+        <button type="button" class="btn btn-ghost" id="btn-cancelar">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <!-- Pré-visualização do relatório -->
+  <dialog id="dlg-preview" aria-labelledby="preview-titulo">
+    <div class="preview-barra">
+      <div class="preview-titulo">
+        <h2 id="preview-titulo">Pré-visualização da impressão</h2>
+        <span id="preview-info" class="item-meta"></span>
+      </div>
+      <div class="preview-acoes">
+        <button type="button" class="btn btn-ghost" id="btn-preview-zoom" title="Alternar entre caber na tela e tamanho real">Tamanho real</button>
+        <button type="button" class="btn btn-ghost" id="btn-preview-fechar">Fechar</button>
+        <button type="button" class="btn btn-primary" id="btn-preview-imprimir">Imprimir</button>
+      </div>
+    </div>
+    <div class="preview-area" id="preview-area">
+      <div class="folha relatorio" id="preview-folha"></div>
+    </div>
+  </dialog>
+
+  <!-- Conteúdo usado só na impressão -->
+  <section id="impressao" class="relatorio" aria-hidden="true"></section>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

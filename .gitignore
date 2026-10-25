@@ -1,0 +1,16 @@
+# Sistema / editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Pastas de deploy locais
+.netlify/
+.vercel/
+
+# Nunca versionar segredos (a chave publicável em config.js pode ficar)
+.env
+.env.*
+*.pem
+*service_role*
