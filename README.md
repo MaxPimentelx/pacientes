@@ -8,7 +8,8 @@ App web (funciona em celular, tablet e computador) para:
 - informar a **data da baixa** para encerrar o processo e filtrar a lista em *Sem baixa / Com baixa / Todos*;
 - **imprimir** a lista de pacientes sem baixa, com situação atual, CID atual e última evolução;
 - registrar o **CID-10** na entrada e **em cada evolução** (o diagnóstico pode mudar ao longo do tratamento). O histórico mostra quando o CID foi alterado;
-- registrar os **dados usados no DRG**: sexo, tipo de alta, CIDs secundários classificados como *comorbidade* ou *complicação* e procedimentos realizados (código TUSS/SIGTAP opcional). O relatório individual traz um **resumo para codificação DRG**.
+- registrar os **dados usados no DRG**: sexo, tipo de alta, CIDs secundários classificados como *comorbidade* ou *complicação* e procedimentos realizados (código TUSS/SIGTAP opcional). O relatório individual traz um **resumo para codificação DRG**;
+- **autoria** de todos os registros: quem cadastrou e quem alterou por último cada paciente, e quem registrou cada evolução (com data e hora). O banco grava isso por *trigger*, então não pode ser falsificado pelo app. Só o autor de uma evolução pode excluí-la. Cada usuário define seu nome de exibição clicando no próprio nome, no topo da tela.
 
 > A tabela `cid10.json` foi gerada a partir dos arquivos oficiais da CID-10 do **DATASUS** (CID10CSV.zip). A **atribuição do diagnóstico é responsabilidade do médico**; o app apenas registra o código informado.
 
@@ -30,7 +31,7 @@ Depois acesse http://localhost:5510. Sem configuração, os dados ficam só no n
 
 1. Crie uma conta em https://supabase.com e clique em **New project** (plano Free; região *South America (São Paulo)*).
 2. No menu **SQL Editor > New query**, cole todo o conteúdo de `supabase/schema.sql` e clique em **Run**.
-   - *Já tinha rodado uma versão anterior do `schema.sql`?* Rode também, em ordem, as migrações que ainda não rodou: `supabase/migracao-01-data-baixa.sql`, `supabase/migracao-02-cid.sql` e `supabase/migracao-03-dados-drg.sql`.
+   - *Já tinha rodado uma versão anterior do `schema.sql`?* Rode também, em ordem, as migrações que ainda não rodou: `supabase/migracao-01-data-baixa.sql`, `supabase/migracao-02-cid.sql`, `supabase/migracao-03-dados-drg.sql` e `supabase/migracao-04-autoria.sql`.
 3. Em **Authentication > Sign In / Providers**, **desative "Allow new users to sign up"**. Assim só entra quem você cadastrar.
 4. Em **Authentication > Users > Add user > Create new user**, crie um usuário (e-mail e senha) para cada pessoa que vai usar o app. Marque **Auto Confirm User**.
 5. Em **Project Settings > API Keys** (ou **Data API**), copie:

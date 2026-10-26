@@ -116,6 +116,19 @@
     return { principal, comorbidades: [...comorbidades], complicacoes: [...complicacoes], procedimentos };
   }
 
+  // ------------------------------------------------------------------
+  // Autoria (quem cadastrou / alterou / registrou)
+  // ------------------------------------------------------------------
+  function fmtDataHora(ts) {
+    if (!ts) return '';
+    return new Date(ts).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+  const autor = (nome, email) => nome || email || 'usuário não identificado';
+  const linhaAutoria = (rotulo, nome, email, ts) =>
+    `${rotulo} <b title="${esc(email || '')}">${esc(autor(nome, email))}</b>${ts ? ` em ${fmtDataHora(ts)}` : ''}`;
+  // só quem registrou pode excluir (regra também garantida no banco)
+  const podeExcluir = e => !MODO_ONLINE || !e.criado_por || e.criado_por === estado.usuario?.id;
+
   const textoProcedimento = pr => [pr.codigo, pr.descricao].filter(Boolean).join(' – ');
 
   // Lista editável de procedimentos (código opcional + descrição)
@@ -327,8 +340,11 @@
     return {
       async sessao() {
         const { data } = await sb.auth.getSession();
-        return data.session ? { email: data.session.user.email } : null;
+        const u = data.session?.user;
+        return u ? { id: u.id, email: u.email, nome: (u.user_metadata?.nome || '').trim() } : null;
       },
+      // nome de exibição usado na autoria dos próximos registros
+      async definirNome(nome) { ok(await sb.auth.updateUser({ data: { nome } })); },
       async entrar(email, senha) { ok(await sb.auth.signInWithPassword({ email, password: senha })); },
       async sair() { await sb.auth.signOut(); },
       async listarPacientes() {
@@ -356,9 +372,13 @@
     const gravar = () => { try { localStorage.setItem(CHAVE, JSON.stringify(mem)); } catch { /* sem storage */ } };
     const novoId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
     const agora = () => new Date().toISOString();
+    // no modo demonstração a autoria é simulada (no Supabase é gravada pelo banco)
+    const usuarioDemo = { id: 'demo', email: 'demonstracao@local', nome: 'Usuário de demonstração' };
+    const criacao = () => ({ criado_em: agora(), criado_por: usuarioDemo.id, criado_por_nome: usuarioDemo.nome, criado_por_email: usuarioDemo.email });
 
     return {
-      async sessao() { return { email: 'modo demonstração' }; },
+      async sessao() { return usuarioDemo; },
+      async definirNome(nome) { usuarioDemo.nome = nome || 'Usuário de demonstração'; },
       async entrar() {},
       async sair() {},
       async listarPacientes() {
@@ -368,16 +388,20 @@
       },
       async obterPaciente(id) { return mem.pacientes.find(p => p.id === id) || null; },
       async criarPaciente(p) {
-        const novo = { ...p, id: novoId(), criado_em: agora() };
+        const novo = { ...p, id: novoId(), ...criacao() };
         mem.pacientes.push(novo); gravar(); return novo;
       },
       async atualizarPaciente(id, p) {
         const atual = mem.pacientes.find(x => x.id === id);
-        Object.assign(atual, p); gravar(); return atual;
+        Object.assign(atual, p, {
+          atualizado_em: agora(), atualizado_por: usuarioDemo.id,
+          atualizado_por_nome: usuarioDemo.nome, atualizado_por_email: usuarioDemo.email
+        });
+        gravar(); return atual;
       },
       async listarEvolucoes(pid) { return ordenarEvolucoes(mem.evolucoes.filter(e => e.paciente_id === pid)); },
       async criarEvolucao(e) {
-        const nova = { ...e, id: novoId(), criado_em: agora() };
+        const nova = { ...e, id: novoId(), ...criacao() };
         mem.evolucoes.push(nova); gravar(); return nova;
       },
       async excluirEvolucao(id) { mem.evolucoes = mem.evolucoes.filter(e => e.id !== id); gravar(); }
@@ -403,8 +427,9 @@
   async function mostrarApp(sessao) {
     $('#tela-login').hidden = true;
     $('#tela-app').hidden = false;
-    $('#user-box').hidden = !MODO_ONLINE;
-    $('#user-email').textContent = sessao.email || '';
+    estado.usuario = sessao;
+    $('#user-box').hidden = false;
+    renderUsuario();
     await Promise.all([carregarPacientes(), carregarCid()]);
     rotear();
   }
@@ -550,7 +575,6 @@
     elDetalhe.innerHTML = `
       <div class="detalhe-topo">
         <button type="button" class="btn btn-ghost btn-sm voltar" data-acao="voltar">← Lista</button>
-        <div class="detalhe-titulo"><h2>${esc(p.nome)}</h2>${pill(r.status)}${p.data_baixa ? pillBaixa(p) : ''}</div>
         <div class="detalhe-botoes">
           <button type="button" class="btn btn-ghost btn-sm" data-acao="imprimir" title="Visualizar e imprimir o relatório deste paciente">Imprimir</button>
           <button type="button" class="btn btn-ghost btn-sm" data-acao="editar">Editar dados</button>
@@ -559,6 +583,10 @@
 
       <div class="card">
         <dl class="info-grid">
+          <div class="span-all info-nome">
+            <dt>Paciente</dt>
+            <dd><h2>${esc(p.nome)}</h2>${pill(r.status)}${p.data_baixa ? pillBaixa(p) : ''}</dd>
+          </div>
           <div><dt>Data de entrada</dt><dd>${fmtData(p.data_entrada)} <span class="item-meta">(${diasInternado >= 0 ? `${diasInternado} dia${diasInternado === 1 ? '' : 's'}${p.data_baixa ? ' até a baixa' : ''}` : 'data futura'})</span></dd></div>
           <div><dt>Data da baixa</dt><dd>${p.data_baixa ? `${fmtData(p.data_baixa)}${p.tipo_alta ? ` · <b>${esc(p.tipo_alta)}</b>` : ''}` : 'Em acompanhamento'}</dd></div>
           <div><dt>Nascimento</dt><dd>${fmtData(p.data_nascimento)}${id !== null ? ` <span class="item-meta">(${id} anos)</span>` : ''}</dd></div>
@@ -570,6 +598,10 @@
           <div class="span-all"><dt>CID de entrada</dt><dd>${cidLista(p.cids_entrada, tiposEntrada(p))}</dd></div>
           ${p.observacoes ? `<div class="span-all"><dt>Observações</dt><dd class="texto">${esc(p.observacoes)}</dd></div>` : ''}
         </dl>
+        <div class="autoria">
+          ${linhaAutoria('Cadastrado por', p.criado_por_nome, p.criado_por_email, p.criado_em)}
+          ${p.atualizado_em ? `<br>${linhaAutoria('Última alteração por', p.atualizado_por_nome, p.atualizado_por_email, p.atualizado_em)}` : ''}
+        </div>
       </div>
 
       ${blocoEvolucao}
@@ -588,8 +620,9 @@
                 <strong>${fmtData(e.data)}</strong>
                 ${e.status ? pill(e.status) : ''}
                 <span class="item-meta">${haQuanto(e.data)}</span>
-                <button type="button" class="link-excluir" data-acao="excluir-evo" data-id="${esc(e.id)}">Excluir</button>
+                ${podeExcluir(e) ? `<button type="button" class="link-excluir" data-acao="excluir-evo" data-id="${esc(e.id)}">Excluir</button>` : ''}
               </div>
+              <div class="tl-autor">${linhaAutoria('Registrado por', e.criado_por_nome, e.criado_por_email, e.criado_em)}</div>
               <p class="texto">${esc(e.descricao)}</p>
               ${e.cids?.length ? `<div class="tl-cids">${cidLista(e.cids, e.cids_tipos)}</div>` : ''}
               ${blocoMudanca(mudancas.get(e.id))}
@@ -600,6 +633,7 @@
             </li>`).join('')}
           <li class="tl-entrada">
             <div class="tl-topo"><strong>${fmtData(p.data_entrada)}</strong><span class="pill s-nenhum">Entrada</span></div>
+            <div class="tl-autor">${linhaAutoria('Cadastrado por', p.criado_por_nome, p.criado_por_email, p.criado_em)}</div>
             <p class="texto">${esc(p.motivo)}</p>
             ${p.cids_entrada?.length ? `<div class="tl-cids">${cidLista(p.cids_entrada, tiposEntrada(p))}</div>` : ''}
           </li>
@@ -811,6 +845,8 @@
         <tr><th>CID de entrada</th><td colspan="3">${listaCids(p.cids_entrada, tiposEntrada(p))}</td></tr>
         <tr><th>CID atual</th><td colspan="3">${listaCids(r.cids, tiposVig)}</td></tr>
         ${p.observacoes ? `<tr><th>Observações</th><td colspan="3" class="texto">${esc(p.observacoes)}</td></tr>` : ''}
+        <tr><th>Cadastrado por</th><td colspan="3">${esc(autor(p.criado_por_nome, p.criado_por_email))}${p.criado_em ? ` em ${fmtDataHora(p.criado_em)}` : ''}</td></tr>
+        ${p.atualizado_em ? `<tr><th>Última alteração</th><td colspan="3">${esc(autor(p.atualizado_por_nome, p.atualizado_por_email))} em ${fmtDataHora(p.atualizado_em)}</td></tr>` : ''}
       </table>
 
       <h2 class="rel-secao">Resumo para codificação (DRG)</h2>
@@ -836,7 +872,7 @@
       <h2 class="rel-secao">Histórico de evolução (${evs.length} registro${evs.length === 1 ? '' : 's'})</h2>
       ${asc.length ? `
       <table class="rel-tabela">
-        <thead><tr><th>Data</th><th>Situação</th><th>CID</th><th>Evolução</th></tr></thead>
+        <thead><tr><th>Data</th><th>Situação</th><th>CID</th><th>Evolução</th><th>Registrado por</th></tr></thead>
         <tbody>
           ${asc.map(e => {
             const m = mudancas.get(e.id);
@@ -849,6 +885,7 @@
                 ${m && m.rotulo === 'Diagnóstico alterado' ? `<div class="sub"><i>${m.rotulo}</i>${m.rem.length ? `<br>saiu: ${esc(m.rem.join(', '))}` : ''}${m.add.length ? `<br>entrou: ${esc(m.add.join(', '))}` : ''}${m.novoPrincipal ? `<br>novo principal: ${esc(m.novoPrincipal)}` : ''}</div>` : ''}</td>
               <td><div class="texto">${esc(e.descricao)}</div>${e.procedimentos?.length
                 ? `<div class="sub"><b>Procedimentos:</b> ${e.procedimentos.map(pr => esc(textoProcedimento(pr))).join('; ')}</div>` : ''}</td>
+              <td class="autor">${esc(autor(e.criado_por_nome, e.criado_por_email))}${e.criado_em ? `<div class="sub">${fmtDataHora(e.criado_em)}</div>` : ''}</td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -1007,6 +1044,27 @@
     } finally {
       botao.disabled = false;
     }
+  });
+
+  function renderUsuario() {
+    const u = estado.usuario || {};
+    $('#user-email').innerHTML = u.nome
+      ? esc(u.nome)
+      : `${esc(u.email || '')} · <span class="sem-nome">definir nome</span>`;
+    $('#btn-meu-nome').title = `${u.email || ''} — clique para ${u.nome ? 'alterar' : 'definir'} seu nome nos registros`;
+    $('#btn-sair').hidden = !MODO_ONLINE;
+  }
+
+  $('#btn-meu-nome').addEventListener('click', async () => {
+    const atual = estado.usuario?.nome || '';
+    const nome = prompt('Seu nome como aparecerá nos cadastros e evoluções (ex.: Dra. Ana Souza – CRM 12345):', atual);
+    if (nome === null) return;
+    try {
+      await db.definirNome(nome.trim());
+      estado.usuario.nome = nome.trim();
+      renderUsuario();
+      toast(nome.trim() ? 'Nome atualizado. Vale para os próximos registros.' : 'Nome removido; será usado o e-mail.');
+    } catch (e) { toast('Erro ao salvar o nome: ' + msgErro(e)); }
   });
 
   $('#btn-sair').addEventListener('click', async () => {

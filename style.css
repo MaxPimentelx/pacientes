@@ -72,6 +72,11 @@ h3 { font-size: 1.02rem; margin-bottom: 12px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; }
 .user { display: flex; align-items: center; gap: 10px; font-size: .88rem; color: var(--muted); min-width: 0; }
 #user-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-nome { min-width: 0; max-width: 46vw; font-weight: 500; }
+.user-nome .sem-nome { color: var(--s-piorando-fg); font-weight: 600; }
+.autoria { font-size: .8rem; color: var(--muted); margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.autoria b { color: var(--text); font-weight: 600; }
+.tl-autor { font-size: .78rem; color: var(--muted); margin-top: 4px; }
 .banner {
   background: var(--s-piorando-bg); color: var(--s-piorando-fg);
   padding: 8px 16px; font-size: .86rem;
@@ -240,8 +245,9 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, .item:focus-visib
 
 /* ---------- Detalhe do paciente ---------- */
 .detalhe-topo { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.detalhe-titulo { flex: 1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
-.detalhe-titulo h2 { overflow-wrap: anywhere; }
+.info-nome dd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.info-nome h2 { overflow-wrap: anywhere; }
+.info-nome { padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .voltar { display: none; }
 
 .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px 20px; margin: 0; }
@@ -356,6 +362,7 @@ dialog h2 { margin-bottom: 16px; }
 .relatorio .rel-secao { font-size: 12pt; margin: 6px 0 8px; }
 .relatorio > p.sub { margin: -8px 0 14px; }
 .relatorio .rel-tabela .cid { width: 16%; }
+.relatorio .rel-tabela .autor { width: 17%; font-size: 9pt; overflow-wrap: anywhere; }
 .relatorio .rel-assinatura { display: flex; gap: 40px; margin-top: 40px; break-inside: avoid; }
 .relatorio .rel-assinatura > div { flex: 1; font-size: 9pt; color: #444; text-align: center; }
 .relatorio .rel-assinatura > div:last-child { flex: 0 0 30%; }
@@ -387,7 +394,7 @@ dialog h2 { margin-bottom: 16px; }
   box-shadow: 0 4px 24px rgba(0, 0, 0, .35);
 }
 .folha.retrato { width: 210mm; min-height: 297mm; }
-.detalhe-botoes { display: flex; gap: 8px; }
+.detalhe-botoes { display: flex; gap: 8px; margin-left: auto; }
 
 /* ---------- Impressão: só o relatório ---------- */
 #impressao { display: none; }
