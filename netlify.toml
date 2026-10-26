@@ -1,0 +1,21 @@
+# Configuração de publicação no Netlify
+# Site estático: não há etapa de build; publica a raiz do repositório.
+[build]
+  publish = "."
+  command = ""
+
+# Cabeçalhos de segurança (app com dados de saúde)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+
+# A tabela CID muda raramente: pode ficar em cache por 1 dia
+[[headers]]
+  for = "/cid10.json"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
