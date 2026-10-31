@@ -14,26 +14,92 @@
   <header class="topbar">
     <div class="brand"><img src="icon.svg" alt="" width="28" height="28"><span>Controle de Pacientes</span></div>
     <div class="user" id="user-box" hidden>
-      <button class="btn btn-ghost btn-sm user-nome" id="btn-meu-nome" type="button" title="Definir seu nome nos registros">
+      <button class="btn btn-ghost btn-sm user-nome" id="btn-meu-nome" type="button" title="Minha conta: nome e senha">
         <span id="user-email"></span>
       </button>
       <button class="btn btn-ghost btn-sm" id="btn-sair" type="button">Sair</button>
     </div>
   </header>
 
+  <div id="aviso-homologacao" class="banner banner-homolog" hidden>
+    <strong>AMBIENTE DE HOMOLOGAÇÃO</strong> — somente testes. Não cadastre pacientes reais aqui.
+  </div>
   <div id="aviso-demo" class="banner" hidden>
-    Modo demonstração: os dados ficam só neste navegador. Configure o Supabase em <code>config.js</code> para usar o banco on-line.
+    Modo demonstração: os dados ficam só neste navegador e não vão para nenhum banco. Para usar o sistema, abra o endereço sem <code>?demo=1</code>.
   </div>
 
   <section id="tela-login" class="login" hidden>
     <form id="form-login" class="card login-card">
       <h1>Entrar</h1>
+      <p class="info-login" id="login-info" hidden></p>
       <label>E-mail <input type="email" name="email" required autocomplete="username"></label>
       <label>Senha <input type="password" name="senha" required autocomplete="current-password"></label>
       <p class="erro" id="login-erro" hidden></p>
       <button class="btn btn-primary" type="submit">Entrar</button>
+      <button class="btn-link" type="button" id="btn-esqueci">Esqueci minha senha</button>
+    </form>
+
+    <!-- Recuperação: pede o e-mail e envia o link -->
+    <form id="form-esqueci" class="card login-card" hidden>
+      <h1>Recuperar acesso</h1>
+      <p>Informe o e-mail da sua conta. Enviaremos um link para você criar uma nova senha.</p>
+      <label>E-mail <input type="email" name="email" required autocomplete="username"></label>
+      <p class="sucesso" hidden></p>
+      <p class="erro" hidden></p>
+      <button class="btn btn-primary" type="submit">Enviar link</button>
+      <button class="btn btn-ghost" type="button" data-acao="voltar-login">Voltar ao login</button>
+    </form>
+
+    <!-- Recuperação: chegou pelo link do e-mail (após as 2 etapas) -->
+    <form id="form-nova-senha" class="card login-card" hidden>
+      <h1>Crie uma nova senha</h1>
+      <label>Nova senha <input type="password" name="senha" required autocomplete="new-password"></label>
+      <label>Repita a nova senha <input type="password" name="confirmacao" required autocomplete="new-password"></label>
+      <small class="dica regra-senha">Mínimo de 10 caracteres, com letras maiúsculas e minúsculas, números e símbolos.</small>
+      <p class="erro" hidden></p>
+      <button class="btn btn-primary" type="submit">Salvar nova senha e entrar</button>
+    </form>
+
+    <!-- 2ª etapa: código do app autenticador -->
+    <form id="form-mfa-codigo" class="card login-card" hidden>
+      <h1>Verificação em 2 etapas</h1>
+      <p>Abra o seu aplicativo autenticador no celular e digite o código de 6 dígitos de <b>Controle de Pacientes</b>.</p>
+      <label>Código
+        <input name="codigo" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+      </label>
+      <p class="erro" hidden></p>
+      <button class="btn btn-primary" type="submit">Verificar e entrar</button>
+      <button class="btn btn-ghost" type="button" data-acao="cancelar-mfa">Sair</button>
+    </form>
+
+    <!-- 1º acesso: ativação obrigatória do app autenticador -->
+    <form id="form-mfa-cadastro" class="card login-card mfa-cadastro" hidden>
+      <h1>Ative a verificação em 2 etapas</h1>
+      <p>Para proteger os dados dos pacientes, o acesso exige, além da senha, um código gerado no seu celular. É só desta vez.</p>
+      <ol class="passos">
+        <li>Instale um app autenticador: <b>Google Authenticator</b>, <b>Microsoft Authenticator</b> ou similar.</li>
+        <li>No app, toque em <b>adicionar conta</b> e leia o QR code abaixo.</li>
+        <li>Digite o código de 6 dígitos que aparecer no app.</li>
+      </ol>
+      <div class="mfa-qr"><img id="mfa-qr" alt="QR code para cadastrar no app autenticador" width="200" height="200"></div>
+      <details class="mfa-chave">
+        <summary>Não consegue ler o QR code?</summary>
+        <p>No app, escolha <b>inserir chave</b> e digite: <code id="mfa-segredo"></code></p>
+      </details>
+      <label>Código de 6 dígitos
+        <input name="codigo" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+      </label>
+      <p class="erro" hidden></p>
+      <button class="btn btn-primary" type="submit">Ativar e entrar</button>
+      <button class="btn btn-ghost" type="button" data-acao="cancelar-mfa">Sair</button>
     </form>
   </section>
+
+  <!-- Aviso de saída automática por inatividade -->
+  <div id="aviso-inatividade" class="aviso-inatividade" role="alertdialog" aria-live="assertive" hidden>
+    <span>Por segurança, sua sessão será encerrada em <b id="inatividade-segundos">60</b> s por falta de uso.</span>
+    <button type="button" class="btn btn-primary btn-sm" id="btn-continuar-conectado">Continuar conectado</button>
+  </div>
 
   <main id="tela-app" class="layout" hidden>
     <aside class="painel-lista">
@@ -50,16 +116,19 @@
           <label><input type="radio" name="filtro-baixa" value="com"><span>Com baixa</span></label>
           <label><input type="radio" name="filtro-baixa" value="todos"><span>Todos</span></label>
         </div>
+        <input type="search" id="busca" placeholder="Buscar por nome, documento ou CID…" aria-label="Buscar paciente">
         <div class="filtros">
-          <input type="search" id="busca" placeholder="Buscar por nome, documento ou CID…" aria-label="Buscar paciente">
           <select id="filtro-status" aria-label="Filtrar por situação">
             <option value="">Qualquer situação</option>
             <option value="Estável">Estável</option>
             <option value="Melhorando">Melhorando</option>
             <option value="Piorando">Piorando</option>
             <option value="Crítico">Crítico</option>
-            <option value="Alta">Alta</option>
             <option value="sem">Sem evolução</option>
+            <option value="atrasada">Passou da previsão de alta</option>
+          </select>
+          <select id="filtro-setor" aria-label="Filtrar por setor">
+            <option value="">Todos os setores</option>
           </select>
         </div>
         <p class="contagem" id="contagem"></p>
@@ -72,42 +141,48 @@
   <dialog id="dlg-paciente">
     <form id="form-paciente" class="form">
       <h2 id="dlg-titulo">Novo paciente</h2>
-      <div class="grid2">
-        <label class="span-all">Nome completo * <input name="nome" required></label>
-        <label>Data de nascimento <input type="date" name="data_nascimento"></label>
-        <label>Sexo
-          <select name="sexo">
-            <option value="">— não informado —</option>
-            <option value="F">Feminino</option>
-            <option value="M">Masculino</option>
-          </select>
-        </label>
-        <label>Telefone <input type="tel" name="telefone"></label>
-        <label>Documento (CPF, RG ou prontuário) <input name="documento"></label>
-        <label>Data de entrada * <input type="date" name="data_entrada" required></label>
-        <label>Data da baixa <input type="date" name="data_baixa">
-          <small class="dica">Preencha para encerrar o processo. Deixe vazio enquanto estiver em acompanhamento.</small>
-        </label>
-        <label id="campo-tipo-alta" hidden>Tipo de alta *
-          <select name="tipo_alta">
-            <option value="">— selecione —</option>
-            <option>Curado</option>
-            <option>Melhorado</option>
-            <option>A pedido</option>
-            <option>Evasão</option>
-            <option>Transferência</option>
-            <option>Óbito</option>
-            <option>Outro</option>
-          </select>
-        </label>
-        <label class="span-all">Motivo da entrada * <textarea name="motivo" rows="3" required></textarea></label>
-        <div class="campo span-all">
-          <span class="rotulo">CID de entrada (CID-10)</span>
-          <div class="cid-picker" id="cid-entrada"></div>
-          <small class="dica">Diagnóstico na admissão. O primeiro é o principal; os demais são registrados como comorbidades (já presentes na entrada).</small>
+
+      <!-- Dados da pessoa -->
+      <fieldset id="sec-pessoa" class="secao-form">
+        <legend>Dados do paciente</legend>
+        <div class="grid2">
+          <label class="span-all">Nome completo * <input name="nome" required></label>
+          <label>Data de nascimento <input type="date" name="data_nascimento"></label>
+          <label>Sexo
+            <select name="sexo">
+              <option value="">— não informado —</option>
+              <option value="F">Feminino</option>
+              <option value="M">Masculino</option>
+            </select>
+          </label>
+          <label>Telefone <input type="tel" name="telefone"></label>
+          <label>Documento (CPF, RG ou prontuário) <input name="documento"></label>
+          <label class="span-all">Observações gerais <textarea name="observacoes" rows="2"
+            placeholder="Alergias, condições permanentes, contato de familiar…"></textarea></label>
         </div>
-        <label class="span-all">Observações <textarea name="observacoes" rows="2"></textarea></label>
-      </div>
+      </fieldset>
+
+      <!-- Dados da internação (episódio) -->
+      <fieldset id="sec-internacao" class="secao-form">
+        <legend>Internação</legend>
+        <div class="grid2">
+          <label>Data de entrada * <input type="date" name="data_entrada" required></label>
+          <label>Previsão de alta <input type="date" name="previsao_alta_inicial">
+            <small class="dica">Opcional. Pode ser atualizada a cada evolução.</small>
+          </label>
+          <label>Setor de entrada
+            <select name="setor_entrada" class="sel-setor"><option value="">— não informado —</option></select>
+          </label>
+          <label>Leito <input name="leito_entrada" maxlength="20" placeholder="Ex.: 12B"></label>
+          <label class="span-all">Motivo da entrada * <textarea name="motivo" rows="3" required></textarea></label>
+          <div class="campo span-all">
+            <span class="rotulo">CID de entrada (CID-10)</span>
+            <div class="cid-picker" id="cid-entrada"></div>
+            <small class="dica">Diagnóstico na admissão. O primeiro é o principal; os demais são registrados como comorbidades (já presentes na entrada).</small>
+          </div>
+          <p class="dica span-all">A <b>alta</b> é registrada por uma evolução do tipo <b>“Alta / desfecho”</b>, que encerra a internação.</p>
+        </div>
+      </fieldset>
       <p class="erro" id="dlg-erro" hidden></p>
       <div class="acoes">
         <button type="button" class="btn btn-ghost" id="btn-cancelar">Cancelar</button>
@@ -117,6 +192,61 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>
+
+  <dialog id="dlg-conta" aria-labelledby="conta-titulo">
+    <div class="conta">
+      <h2 id="conta-titulo">Minha conta</h2>
+      <p class="item-meta" id="conta-email"></p>
+
+      <form id="form-nome" class="form conta-secao">
+        <h3>Nome nos registros</h3>
+        <label>Nome de exibição
+          <input name="nome" maxlength="80" placeholder="Ex.: Dra. Ana Souza – CRM 12345">
+        </label>
+        <small class="dica">Aparece como autor nos cadastros e evoluções a partir de agora. Os registros já feitos mantêm o nome da época.</small>
+        <p class="erro" hidden></p>
+        <div class="acoes"><button type="submit" class="btn btn-primary">Salvar nome</button></div>
+      </form>
+
+      <section id="sec-setores" class="conta-secao" hidden>
+        <h3>Setores (administrador)</h3>
+        <p class="dica">Lista oferecida no cadastro e na mudança de setor. Setores desativados somem das opções, mas continuam no histórico.</p>
+        <ul class="setores-lista" id="setores-lista"></ul>
+        <form id="form-setor-novo" class="setor-novo">
+          <input name="nome" maxlength="60" placeholder="Novo setor (ex.: Ala B – 3º andar)" aria-label="Nome do novo setor" required>
+          <button type="submit" class="btn btn-ghost btn-sm">Adicionar</button>
+        </form>
+        <p class="erro" id="setores-erro" hidden></p>
+      </section>
+
+      <form id="form-alterar-senha" class="form conta-secao">
+        <h3>Alterar senha</h3>
+        <label>Nova senha <input type="password" name="senha" required autocomplete="new-password"></label>
+        <label>Repita a nova senha <input type="password" name="confirmacao" required autocomplete="new-password"></label>
+        <small class="dica">Mínimo de 10 caracteres, com letras maiúsculas e minúsculas, números e símbolos.</small>
+        <p class="erro" hidden></p>
+        <div class="acoes"><button type="submit" class="btn btn-primary">Alterar senha</button></div>
+      </form>
+
+      <div class="acoes"><button type="button" class="btn btn-ghost" id="btn-conta-fechar">Fechar</button></div>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-anular" aria-labelledby="anular-titulo">
+    <form id="form-anular" class="form">
+      <h2 id="anular-titulo">Anular evolução</h2>
+      <p class="item-meta" id="anular-info"></p>
+      <p>O registro <b>não será apagado</b>: continuará visível no histórico, marcado como anulado, com seu nome, a data e a justificativa.</p>
+      <label>Justificativa *
+        <textarea name="motivo" rows="3" required minlength="10" placeholder="Ex.: evolução registrada no paciente errado."></textarea>
+      </label>
+      <p class="erro" id="anular-erro" hidden></p>
+      <div class="acoes">
+        <button type="button" class="btn btn-ghost" id="btn-anular-cancelar">Cancelar</button>
+        <button type="submit" class="btn btn-perigo">Anular evolução</button>
+      </div>
+    </form>
+  </dialog>
 
   <!-- Pré-visualização do relatório -->
   <dialog id="dlg-preview" aria-labelledby="preview-titulo">

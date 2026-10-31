@@ -1,0 +1,87 @@
+# Backup diário do banco de PRODUÇÃO (Supabase)
+#
+# O que faz: exporta os dados (pacientes, evoluções, auditoria e usuários),
+# criptografa com AES-256 e guarda como artefato do GitHub por 30 dias.
+# Os arquivos só abrem com a senha BACKUP_SENHA — guarde-a fora do GitHub.
+#
+# Segredos necessários (GitHub > Settings > Secrets and variables > Actions):
+#   SUPABASE_DB_URL_PRODUCAO  string de conexão "Session pooler" (com a senha do banco)
+#   BACKUP_SENHA              senha longa usada para criptografar os backups
+#
+# Restauração: veja docs/BACKUP.md
+name: Backup diário do banco
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC = 03:00 em Brasília
+  workflow_dispatch:       # permite rodar manualmente pela aba Actions
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-banco
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Conferir segredos
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL_PRODUCAO }}
+          SENHA: ${{ secrets.BACKUP_SENHA }}
+        run: |
+          [ -n "$DB_URL" ] || { echo "::error::Segredo SUPABASE_DB_URL_PRODUCAO não configurado"; exit 1; }
+          [ -n "$SENHA" ]  || { echo "::error::Segredo BACKUP_SENHA não configurado"; exit 1; }
+          [ ${#SENHA} -ge 16 ] || { echo "::error::BACKUP_SENHA deve ter ao menos 16 caracteres"; exit 1; }
+
+      - name: Instalar cliente PostgreSQL 17 (mesma versão do Supabase)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Exportar banco
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL_PRODUCAO }}
+        run: |
+          set -euo pipefail
+          PG=/usr/lib/postgresql/17/bin
+          NOME="backup-pacientes-$(date -u +%Y%m%d-%H%M)"
+          mkdir "$NOME"
+          # 1) estrutura + dados do app (pacientes, evoluções, auditoria)
+          "$PG/pg_dump" "$DB_URL" --schema=public --format=custom --no-owner --no-privileges \
+            --file="$NOME/app.dump"
+          # 2) usuários (necessários para a autoria dos registros)
+          "$PG/pg_dump" "$DB_URL" --data-only --format=custom \
+            --table=auth.users --table=auth.identities --table=auth.mfa_factors \
+            --file="$NOME/usuarios.dump"
+          # 3) contagem de registros, para conferência
+          "$PG/psql" "$DB_URL" -At -c "select 'pacientes='||count(*) from public.pacientes
+            union all select 'evolucoes='||count(*) from public.evolucoes
+            union all select 'auditoria='||count(*) from public.auditoria" > "$NOME/contagem.txt"
+          cat "$NOME/contagem.txt"
+          tar -czf "$NOME.tar.gz" "$NOME"
+          rm -rf "$NOME"
+          echo "NOME=$NOME" >> "$GITHUB_ENV"
+
+      - name: Criptografar (AES-256)
+        env:
+          SENHA: ${{ secrets.BACKUP_SENHA }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SENHA" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 --output "$NOME.tar.gz.gpg" "$NOME.tar.gz"
+          shred -u "$NOME.tar.gz"
+          ls -la "$NOME.tar.gz.gpg"
+
+      - name: Guardar backup criptografado (30 dias)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.NOME }}
+          path: ${{ env.NOME }}.tar.gz.gpg
+          retention-days: 30
+          if-no-files-found: error
