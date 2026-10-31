@@ -72,7 +72,8 @@ O Netlify publica sozinho a cada envio ao GitHub ([netlify.toml](netlify.toml)):
 
 ## Observações
 
-- **Projeto pausado:** no plano gratuito, o Supabase pausa projetos sem uso por 7 dias. Para reativar, clique em *Restore* no painel. Os dados não se perdem.
+- **Projeto pausado:** no plano gratuito, o Supabase pausa projetos sem uso por 7 dias. O fluxo [`manter-ativo.yml`](.github/workflows/manter-ativo.yml) faz uma consulta leve por dia nos dois projetos para evitar isso (se falhar, o GitHub avisa por e-mail). Se ainda assim pausar, clique em *Restore* no painel. Os dados não se perdem.
+- **GitHub desliga agendamentos** de repositórios sem nenhum commit por 60 dias: se isso acontecer, reative em *Actions → Manter Supabase ativo → Enable workflow*.
 - **LGPD:** dados de saúde são dados pessoais *sensíveis*. Restrinja o acesso a quem realmente precisa.
 - **Prontuário oficial:** para substituir o prontuário em papel, as normas do CFM exigem certificação SBIS/CFM (NGS2) e assinatura digital ICP-Brasil. Valide com o responsável técnico antes de usar o app como registro oficial.
 
@@ -87,6 +88,7 @@ O Netlify publica sozinho a cada envio ao GitHub ([netlify.toml](netlify.toml)):
 | `cid10.json` | Tabela CID-10 (DATASUS): cerca de 14 mil códigos para a busca |
 | `supabase/` | Esquema do banco e migrações versionadas |
 | `.github/workflows/backup-diario.yml` | Backup diário criptografado |
+| `.github/workflows/manter-ativo.yml` | Consulta diária que evita a pausa do Supabase gratuito |
 | `docs/BACKUP.md` | Como configurar, baixar e restaurar backups |
 | `netlify.toml` | Publicação e cabeçalhos de segurança |
 | `manifest.webmanifest`, `icon.svg` | Permite instalar na tela inicial |

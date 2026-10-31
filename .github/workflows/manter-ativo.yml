@@ -1,0 +1,41 @@
+# Faz uma consulta leve por dia nos dois projetos Supabase para que o plano
+# gratuito não os pause por inatividade (pausa após 7 dias sem uso).
+# As chaves abaixo são as publicáveis (as mesmas de config.js): a consulta não
+# enxerga nenhum dado, porque as regras de segurança (RLS) exigem login.
+name: Manter Supabase ativo
+
+on:
+  schedule:
+    - cron: '17 9 * * *' # 06:17 em Brasília, todos os dias
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ambiente: producao
+            ref: vxpovguooglhesvpmoka
+            chave: sb_publishable_ONlCJR-5m_sWd89vbP1POQ_KtQSwEMe
+          - ambiente: homologacao
+            ref: gqpspuywkjmycfsooncu
+            chave: sb_publishable_rEl11zyovMlYFpHwPBVSRA_lgfppGHY
+    name: ping ${{ matrix.ambiente }}
+    steps:
+      - name: Consulta leve no banco
+        env:
+          REF: ${{ matrix.ref }}
+          CHAVE: ${{ matrix.chave }}
+        run: |
+          codigo=$(curl -s -o /dev/null -w '%{http_code}' --retry 3 --retry-delay 20 \
+            "https://${REF}.supabase.co/rest/v1/pacientes?select=id&limit=1" \
+            -H "apikey: ${CHAVE}")
+          echo "HTTP ${codigo}"
+          # Falhar faz o GitHub avisar por e-mail (ex.: projeto já pausado).
+          test "$codigo" = 200
