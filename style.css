@@ -318,6 +318,12 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, .item:focus-visib
 .pendencias-opcoes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px 14px; }
 label.chk { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; color: var(--text); font-size: .88rem; }
 label.chk input { width: 18px; height: 18px; flex: none; }
+.setor-atual-evo {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; font-size: .9rem;
+  background: var(--s-estavel-bg); color: var(--s-estavel-fg);
+}
+.setor-atual-evo.sem-setor { background: var(--s-piorando-bg); color: var(--s-piorando-fg); }
 .aviso-alta { background: var(--s-critico-bg); color: var(--s-critico-fg); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .aviso-alta p { margin: 0; font-size: .88rem; }
 .aviso-alta label { color: var(--s-critico-fg); }

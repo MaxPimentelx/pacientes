@@ -1228,9 +1228,14 @@
   function blocoFormEvolucao(v, r) {
     const pendPadrao = v.pendencias_alta.filter(x => PENDENCIAS.includes(x));
     const pendOutras = v.pendencias_alta.filter(x => !PENDENCIAS.includes(x));
+    const setorAtual = textoSetor(v.setor_atual, v.leito_atual);
     return `
       <form class="card form" id="form-evolucao">
         <h3>Registrar evolução</h3>
+        <div class="setor-atual-evo ${setorAtual ? '' : 'sem-setor'}" data-setor-atual>
+          <span>${setorAtual ? `Setor atual: <b>${esc(setorAtual)}</b>` : '⚠ <b>Setor não informado</b> nesta internação'}</span>
+          <button type="button" class="btn btn-ghost btn-sm" data-acao="mudar-setor">${setorAtual ? 'Mudar setor' : 'Informar setor'}</button>
+        </div>
         <div class="grid-evo">
           <label>Data <input type="date" name="data" required value="${hoje()}" min="${esc(v.data_entrada)}" max="${hoje()}"></label>
           <label>O que aconteceu
@@ -1310,6 +1315,7 @@
   function aplicarTipoRegistro(form) {
     const tipo = form.elements.tipo.value;
     form.querySelectorAll('.cond').forEach(el => { el.hidden = el.dataset.tipo !== tipo; });
+    form.querySelector('[data-setor-atual]').hidden = tipo === 'setor';
     form.querySelector('[data-nao-alta]').hidden = tipo === 'alta';
     form.querySelector('.opcional-proc').textContent = tipo === 'procedimento' ? '(informe ao menos um)' : '(opcional)';
     form.querySelector('[type=submit]').textContent = tipo === 'alta' ? 'Registrar alta e encerrar internação' : 'Salvar evolução';
@@ -1468,6 +1474,12 @@
     const formEvo = $('#form-evolucao', elDetalhe);
     if (formEvo) {
       formEvo.elements.tipo.addEventListener('change', () => aplicarTipoRegistro(formEvo));
+      // atalho da faixa "Setor atual": já abre o registro de mudança de setor
+      $('[data-acao=mudar-setor]', formEvo).addEventListener('click', () => {
+        formEvo.elements.tipo.value = 'setor';
+        aplicarTipoRegistro(formEvo);
+        formEvo.elements.setor.focus();
+      });
       aplicarTipoRegistro(formEvo);
     }
 
