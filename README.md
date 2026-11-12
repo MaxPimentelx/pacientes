@@ -22,6 +22,8 @@ Banco de dados: **Supabase**. Hospedagem: **Netlify**, publicado automaticamente
 | Recurso | Como funciona |
 |---|---|
 | **Verificação em 2 etapas (MFA)** | Obrigatória para todos: senha + código de um app autenticador (Google/Microsoft Authenticator). No 1º acesso o app guia a ativação por QR code. O banco recusa qualquer leitura ou gravação sem o 2º fator. Se alguém perder o celular, um administrador remove o fator em *Supabase → Authentication → Users → (usuário)*. |
+| **Usuários e papéis** | Dois papéis: **administrador** e **operador** (todos os demais). O administrador cadastra usuários pelo próprio app (*seu nome → Gerenciar usuários*), troca o papel, gera senha temporária, remove a verificação em 2 etapas de quem perdeu o celular e **desativa** quem não deve mais entrar. O banco confere a situação **atual** de cada usuário (não a cópia guardada na sessão): quem é desativado ou rebaixado perde o acesso ou o poder na hora, e desativar, gerar senha temporária ou remover as 2 etapas derruba as sessões abertas da pessoa. Os registros dela continuam. Ninguém altera a própria conta por ali, o sistema nunca fica sem administrador ativo, e toda ação é gravada **antes** de acontecer na tabela `auditoria_usuarios` (sem registro, nada é feito). |
+| **Senha temporária** | O usuário novo recebe do administrador uma senha temporária (entregue pessoalmente). No 1º acesso ativa as 2 etapas e cria a própria senha; até lá o banco não libera nenhum dado. |
 | **Saída por inatividade** | Após 15 min sem uso a sessão é encerrada (aviso 60 s antes), em todas as abas, e os dados somem da tela. |
 | **Autoria** | O banco grava quem cadastrou/alterou cada paciente e quem registrou cada evolução (não pode ser falsificado pelo app). Cada usuário define seu nome clicando nele, no topo da tela. |
 | **Nada se apaga** | Evoluções não são excluídas: o autor pode **anular com justificativa**; o registro continua visível, riscado, com quem anulou, quando e por quê. Pacientes também não podem ser excluídos. |
@@ -50,14 +52,15 @@ Acesse http://localhost:5510 (homologação) ou http://localhost:5510/?demo=1 (d
 
 As alterações do banco ficam versionadas em `supabase/`:
 
-- **Banco novo:** rode `schema.sql` e depois, em ordem, `migracao-05-anulacao-auditoria.sql`, `migracao-06-mfa-obrigatorio.sql`, `migracao-07-anulacao-por-politica.sql` e `migracao-08-internacoes-eventos.sql`.
+- **Banco novo:** rode `schema.sql` e depois, em ordem, `migracao-05-anulacao-auditoria.sql`, `migracao-06-mfa-obrigatorio.sql`, `migracao-07-anulacao-por-politica.sql`, `migracao-08-internacoes-eventos.sql` e `migracao-09-gestao-usuarios.sql`.
 - **Banco existente:** rode, em ordem, só as migrações que ainda não foram aplicadas.
+- **Função de servidor `usuarios`** ([supabase/functions/usuarios](supabase/functions/usuarios/index.ts)): publicada em cada projeto Supabase (*Edge Functions*), com *Verify JWT* **desligado** (a própria função confere a sessão, o papel de administrador e as 2 etapas). Ela usa a chave de serviço que o Supabase já fornece ao servidor; essa chave nunca vai para o app.
 
 Configurações que ficam no painel do Supabase (fazer nos **dois** projetos):
 
 1. **Authentication → Sign In / Providers:** desligar *Allow new users to sign up* (só entra quem for cadastrado).
 2. **Authentication → Providers → Email:** senha mínima de **10 caracteres**, exigindo letras maiúsculas, minúsculas, números e símbolos.
-3. **Authentication → Users → Add user:** criar um usuário por pessoa (marcar *Auto Confirm User*). Nunca compartilhar contas.
+3. **Primeiro administrador:** em *SQL Editor*, `update auth.users set raw_app_meta_data = raw_app_meta_data || '{"papel":"admin"}' where email = 'EMAIL_DO_ADMIN';`. Os demais usuários são cadastrados pelo próprio app. Um usuário por pessoa; nunca compartilhar contas.
 
 > As chaves em `config.js` são *publicáveis*: quem protege os dados são as regras de segurança (RLS) do banco. **Nunca** coloque a chave `service_role`/`secret` no app.
 
@@ -86,7 +89,7 @@ O Netlify publica sozinho a cada envio ao GitHub ([netlify.toml](netlify.toml)):
 | `app.js` | Lógica do app e acesso ao banco |
 | `config.js` | Escolha do ambiente e chaves publicáveis do Supabase |
 | `cid10.json` | Tabela CID-10 (DATASUS): cerca de 14 mil códigos para a busca |
-| `supabase/` | Esquema do banco e migrações versionadas |
+| `supabase/` | Esquema do banco, migrações versionadas e a função de servidor `usuarios` |
 | `.github/workflows/backup-diario.yml` | Backup diário criptografado |
 | `.github/workflows/manter-ativo.yml` | Consulta diária que evita a pausa do Supabase gratuito |
 | `docs/BACKUP.md` | Como configurar, baixar e restaurar backups |

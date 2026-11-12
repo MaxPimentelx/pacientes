@@ -410,6 +410,7 @@
   function msgErro(e) {
     const m = e?.message || String(e);
     if (/Invalid login credentials/i.test(m)) return 'E-mail ou senha incorretos.';
+    if (/banned/i.test(m)) return 'Este usuário está desativado. Fale com o administrador do sistema.';
     if (/Failed to fetch|NetworkError/i.test(m)) return 'Sem conexão com o servidor. Verifique a internet.';
     if (/should be different/i.test(m)) return 'A nova senha deve ser diferente da senha atual.';
     if (/rate limit|too many/i.test(m)) return 'Muitas tentativas seguidas. Aguarde alguns minutos e tente de novo.';
@@ -447,15 +448,36 @@
         // volta para o mesmo endereço do app (precisa estar liberado em Auth > URL Configuration)
         ok(await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname }));
       },
-      async alterarSenha(senha) { ok(await sb.auth.updateUser({ password: senha })); },
+      // Senha temporária (dada pelo administrador): a troca passa pelo servidor, que é
+      // quem libera o acesso aos dados. Fora disso, troca normal.
+      async alterarSenha(senha) {
+        const { data } = await sb.auth.getSession();
+        if (data.session?.user?.app_metadata?.trocar_senha === true) {
+          await this.gerenciarUsuarios('definir_minha_senha', { senha });
+          ok(await sb.auth.refreshSession()); // token novo, já sem a pendência
+          return;
+        }
+        ok(await sb.auth.updateUser({ password: senha }));
+      },
       async sessao() {
         const { data } = await sb.auth.getSession();
         const u = data.session?.user;
         return u ? {
           id: u.id, email: u.email,
           nome: (u.user_metadata?.nome || '').trim(),
-          papel: u.app_metadata?.papel || null
+          papel: u.app_metadata?.papel === 'admin' ? 'admin' : 'operador',
+          trocarSenha: u.app_metadata?.trocar_senha === true
         } : null;
+      },
+      // gestão de usuários: função de servidor "usuarios" (só administradores)
+      async gerenciarUsuarios(acao, dados = {}) {
+        const { data, error } = await sb.functions.invoke('usuarios', { body: { acao, ...dados } });
+        if (error) {
+          let msg = null;
+          try { msg = (await error.context.json())?.erro; } catch { /* sem corpo */ }
+          throw new Error(msg || error.message);
+        }
+        return data;
       },
       // nome de exibição usado na autoria dos próximos registros
       async definirNome(nome) { ok(await sb.auth.updateUser({ data: { nome } })); },
@@ -638,8 +660,42 @@
       return i;
     }
 
+    // usuários simulados (no Supabase quem gerencia é a função de servidor "usuarios")
+    if (!Array.isArray(mem.usuarios)) {
+      mem.usuarios = [
+        { id: 'demo', email: usuarioDemo.email, nome: usuarioDemo.nome, papel: 'admin', ativo: true, criado_em: agora(), ultimo_acesso: agora(), tem_2_etapas: true, trocar_senha: false },
+        { id: novoId(), email: 'enfermagem@exemplo.local', nome: 'Operador de exemplo', papel: 'operador', ativo: true, criado_em: agora(), ultimo_acesso: null, tem_2_etapas: false, trocar_senha: true }
+      ];
+      gravar();
+    }
+    const senhaDemo = () => 'Demo-' + Math.random().toString(36).slice(2, 8) + '#7Q';
+
     return {
       async sessao() { return usuarioDemo; },
+      async gerenciarUsuarios(acao, d = {}) {
+        if (acao === 'listar') return { usuarios: mem.usuarios.map(u => ({ ...u })) };
+        if (acao === 'criar') {
+          const email = String(d.email || '').trim().toLowerCase();
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Informe um e-mail válido.');
+          if (!String(d.nome || '').trim()) throw new Error('Informe o nome do usuário.');
+          if (mem.usuarios.some(u => u.email === email)) throw new Error('Já existe um usuário com este e-mail.');
+          const u = { id: novoId(), email, nome: d.nome.trim(), papel: d.papel === 'admin' ? 'admin' : 'operador', ativo: true, criado_em: agora(), ultimo_acesso: null, tem_2_etapas: false, trocar_senha: true };
+          mem.usuarios.push(u); gravar();
+          return { usuario: { ...u }, senha_temporaria: senhaDemo() };
+        }
+        const u = mem.usuarios.find(x => x.id === d.id);
+        if (!u) throw new Error('Usuário não encontrado.');
+        if (u.id === usuarioDemo.id) throw new Error('Você não pode alterar a sua própria conta por aqui. Peça a outro administrador.');
+        let senha;
+        if (acao === 'papel') u.papel = d.papel === 'admin' ? 'admin' : 'operador';
+        else if (acao === 'desativar') u.ativo = false;
+        else if (acao === 'reativar') u.ativo = true;
+        else if (acao === 'senha_temporaria') { u.trocar_senha = true; senha = senhaDemo(); }
+        else if (acao === 'remover_2_etapas') u.tem_2_etapas = false;
+        else throw new Error('Ação desconhecida.');
+        gravar();
+        return { usuario: { ...u }, senha_temporaria: senha };
+      },
       async definirNome(nome) { usuarioDemo.nome = nome || 'Usuário de demonstração'; },
       async entrar() {},
       async sair() {},
@@ -760,9 +816,17 @@
   }
 
   // Depois das 2 etapas: quem veio do link de recuperação cria a senha nova antes de entrar
+  // Quem entrou com a senha temporária dada pelo administrador também cria a sua antes de entrar
   async function aposSegundaEtapa() {
-    if (MODO_ONLINE && db.veioDeRecuperacaoDeSenha()) return mostrarLogin(null, 'nova-senha');
-    return mostrarApp(await db.sessao());
+    const s = await db.sessao();
+    const recuperacao = MODO_ONLINE && db.veioDeRecuperacaoDeSenha();
+    if (recuperacao || (MODO_ONLINE && s?.trocarSenha)) {
+      const info = $('#nova-senha-info');
+      info.hidden = recuperacao;
+      info.textContent = 'Você entrou com uma senha temporária. Crie agora a sua senha pessoal para continuar.';
+      return mostrarLogin(null, 'nova-senha');
+    }
+    return mostrarApp(s);
   }
 
   async function mostrarApp(sessao) {
@@ -886,7 +950,8 @@
 
   function abrirConta() {
     const u = estado.usuario || {};
-    $('#conta-email').textContent = `${u.email || ''}${ehAdmin() ? ' · administrador' : ''}`;
+    $('#conta-email').textContent = `${u.email || ''} · ${ehAdmin() ? 'administrador' : 'operador'}`;
+    $('#sec-usuarios').hidden = !ehAdmin();
     $('#form-nome').elements.nome.value = u.nome || '';
     $('#form-alterar-senha').reset();
     $('#form-alterar-senha').hidden = !MODO_ONLINE;
@@ -1000,6 +1065,156 @@
       renderSetoresAdmin();
       toast('Setor adicionado.');
     } catch (e) { erro.textContent = msgErro(e); erro.hidden = false; }
+  });
+
+  // ------------------------------------------------------------------
+  // Usuários do sistema (administrador). A regra vale no servidor: a função
+  // "usuarios" recusa quem não é administrador ativo com 2 etapas.
+  // ------------------------------------------------------------------
+  const dlgUsuarios = $('#dlg-usuarios');
+  let usuarios = [];
+  const PAPEL_ROTULO = { admin: 'Administrador', operador: 'Operador' };
+
+  async function abrirUsuarios() {
+    dlgConta.close();
+    $('#form-usuario-novo').reset();
+    $('#usuario-senha').hidden = true;
+    dlgUsuarios.querySelectorAll('.erro').forEach(e => { e.hidden = true; });
+    $('#usuarios-lista').innerHTML = '<li class="dica">Carregando…</li>';
+    dlgUsuarios.showModal();
+    await carregarUsuarios();
+  }
+  $('#btn-gerenciar-usuarios').addEventListener('click', abrirUsuarios);
+  $('#btn-usuarios-fechar').addEventListener('click', () => dlgUsuarios.close());
+
+  async function carregarUsuarios() {
+    const erro = $('#usuarios-erro');
+    erro.hidden = true;
+    try {
+      usuarios = (await db.gerenciarUsuarios('listar')).usuarios || [];
+      renderUsuarios();
+    } catch (e) {
+      $('#usuarios-lista').innerHTML = '';
+      erro.textContent = 'Não foi possível carregar os usuários: ' + msgErro(e);
+      erro.hidden = false;
+    }
+  }
+
+  function renderUsuarios() {
+    const eu = estado.usuario?.id;
+    const ordem = usuarios.slice().sort((a, b) =>
+      (b.ativo - a.ativo) || (a.nome || a.email).localeCompare(b.nome || b.email, 'pt-BR'));
+    $('#usuarios-lista').innerHTML = ordem.map(u => {
+      const tags = [
+        `<span class="pill ${u.papel === 'admin' ? 's-melhorando' : 's-nenhum'}">${PAPEL_ROTULO[u.papel]}</span>`,
+        u.ativo ? '' : '<span class="pill s-critico">Desativado</span>',
+        u.trocar_senha ? '<span class="pill s-piorando">Senha temporária</span>' : '',
+        u.tem_2_etapas ? '' : '<span class="pill s-nenhum">2 etapas não ativada</span>'
+      ].join(' ');
+      const acoes = u.id === eu
+        ? '<span class="item-meta">Você (peça a outro administrador para alterar a sua conta)</span>'
+        : `<label class="usuario-papel">Papel
+             <select data-acao="papel" aria-label="Papel de ${esc(u.email)}">
+               ${Object.entries(PAPEL_ROTULO).map(([v, r]) => `<option value="${v}" ${v === u.papel ? 'selected' : ''}>${r}</option>`).join('')}
+             </select></label>
+           <button type="button" class="btn btn-ghost btn-sm" data-acao="senha_temporaria">Nova senha temporária</button>
+           ${u.tem_2_etapas ? '<button type="button" class="btn btn-ghost btn-sm" data-acao="remover_2_etapas">Remover 2 etapas</button>' : ''}
+           <button type="button" class="btn btn-sm ${u.ativo ? 'btn-perigo' : 'btn-primary'}" data-acao="${u.ativo ? 'desativar' : 'reativar'}">${u.ativo ? 'Desativar' : 'Reativar'}</button>`;
+      return `
+        <li class="usuario ${u.ativo ? '' : 'inativo'}" data-id="${esc(u.id)}">
+          <div class="usuario-info">
+            <b>${esc(u.nome || u.email)}</b>
+            <span class="item-meta">${esc(u.email)} · último acesso: ${u.ultimo_acesso ? fmtData(u.ultimo_acesso) : 'nunca'}</span>
+            <div class="usuario-tags">${tags}</div>
+          </div>
+          <div class="usuario-acoes">${acoes}</div>
+        </li>`;
+    }).join('') || '<li class="dica">Nenhum usuário.</li>';
+  }
+
+  function mostrarSenhaTemporaria(email, senha) {
+    const box = $('#usuario-senha');
+    box.querySelector('[data-email]').textContent = email;
+    box.querySelector('[data-senha]').textContent = senha;
+    box.hidden = false;
+    box.scrollIntoView({ block: 'nearest' });
+  }
+  $('#usuario-senha').addEventListener('click', async ev => {
+    const b = ev.target.closest('[data-acao]');
+    if (!b) return;
+    const box = $('#usuario-senha');
+    if (b.dataset.acao === 'fechar-senha') {
+      box.hidden = true;
+      box.querySelector('[data-senha]').textContent = ''; // não fica na tela
+    } else if (b.dataset.acao === 'copiar-senha') {
+      try { await navigator.clipboard.writeText(box.querySelector('[data-senha]').textContent); toast('Senha copiada.'); }
+      catch { toast('Não foi possível copiar: anote a senha.'); }
+    }
+  });
+
+  $('#form-usuario-novo').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const form = ev.target;
+    const erro = form.querySelector('.erro');
+    const botao = form.querySelector('[type=submit]');
+    erro.hidden = true;
+    botao.disabled = true;
+    try {
+      const r = await db.gerenciarUsuarios('criar', {
+        nome: form.elements.nome.value.trim(), email: form.elements.email.value.trim(), papel: form.elements.papel.value
+      });
+      form.reset();
+      await carregarUsuarios();
+      mostrarSenhaTemporaria(r.usuario.email, r.senha_temporaria);
+      toast('Usuário cadastrado.');
+    } catch (e) {
+      erro.textContent = msgErro(e);
+      erro.hidden = false;
+    } finally {
+      botao.disabled = false;
+    }
+  });
+
+  const CONFIRMACAO = {
+    desativar: u => `Desativar ${u.nome || u.email}? A pessoa perde o acesso imediatamente. Os registros dela continuam no sistema.`,
+    reativar: u => `Reativar ${u.nome || u.email}? A pessoa volta a poder entrar com a senha atual.`,
+    senha_temporaria: u => `Gerar uma nova senha temporária para ${u.nome || u.email}? A senha atual deixa de valer e a pessoa é desconectada de todos os aparelhos.`,
+    remover_2_etapas: u => `Remover a verificação em 2 etapas de ${u.nome || u.email}? A pessoa é desconectada de todos os aparelhos e, no próximo acesso, ativa de novo com um QR code. Use quando ela perdeu ou trocou de celular.`,
+    papel: (u, p) => `Mudar ${u.nome || u.email} para ${PAPEL_ROTULO[p]}? A permissão muda na hora.`
+  };
+  const SUCESSO = {
+    desativar: 'Usuário desativado.', reativar: 'Usuário reativado.', senha_temporaria: 'Nova senha temporária gerada.',
+    remover_2_etapas: 'Verificação em 2 etapas removida.', papel: 'Papel alterado.'
+  };
+
+  async function acaoUsuario(el, acao, extra = {}) {
+    const li = el.closest('li[data-id]');
+    const u = usuarios.find(x => x.id === li.dataset.id);
+    const erro = $('#usuarios-erro');
+    erro.hidden = true;
+    if (!confirm(CONFIRMACAO[acao](u, extra.papel))) {
+      if (acao === 'papel') el.value = u.papel; // desfaz a escolha
+      return;
+    }
+    li.querySelectorAll('button, select').forEach(c => { c.disabled = true; });
+    try {
+      const r = await db.gerenciarUsuarios(acao, { id: u.id, ...extra });
+      await carregarUsuarios();
+      if (r.senha_temporaria) mostrarSenhaTemporaria(u.email, r.senha_temporaria);
+      toast(SUCESSO[acao]);
+    } catch (e) {
+      erro.textContent = msgErro(e);
+      erro.hidden = false;
+      renderUsuarios();
+    }
+  }
+  $('#usuarios-lista').addEventListener('click', ev => {
+    const b = ev.target.closest('button[data-acao]');
+    if (b) acaoUsuario(b, b.dataset.acao);
+  });
+  $('#usuarios-lista').addEventListener('change', ev => {
+    const s = ev.target.closest('select[data-acao=papel]');
+    if (s) acaoUsuario(s, 'papel', { papel: s.value });
   });
 
   // ------------------------------------------------------------------
@@ -2108,7 +2323,7 @@
     $('#user-email').innerHTML = u.nome
       ? esc(u.nome)
       : `${esc(u.email || '')} · <span class="sem-nome">definir nome</span>`;
-    $('#btn-meu-nome').title = `${u.email || ''} — minha conta (nome, senha${ehAdmin() ? ', setores' : ''})`;
+    $('#btn-meu-nome').title = `${u.email || ''} — minha conta (nome, senha${ehAdmin() ? ', usuários, setores' : ''})`;
     $('#btn-sair').hidden = !MODO_ONLINE;
   }
 

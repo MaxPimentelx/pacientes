@@ -53,6 +53,7 @@
     <!-- Recuperação: chegou pelo link do e-mail (após as 2 etapas) -->
     <form id="form-nova-senha" class="card login-card" hidden>
       <h1>Crie uma nova senha</h1>
+      <p class="info-login" id="nova-senha-info" hidden></p>
       <label>Nova senha <input type="password" name="senha" required autocomplete="new-password"></label>
       <label>Repita a nova senha <input type="password" name="confirmacao" required autocomplete="new-password"></label>
       <small class="dica regra-senha">Mínimo de 10 caracteres, com letras maiúsculas e minúsculas, números e símbolos.</small>
@@ -208,6 +209,12 @@
         <div class="acoes"><button type="submit" class="btn btn-primary">Salvar nome</button></div>
       </form>
 
+      <section id="sec-usuarios" class="conta-secao" hidden>
+        <h3>Usuários (administrador)</h3>
+        <p class="dica">Cadastre quem usa o sistema, defina quem é administrador ou operador e desative quem não deve mais entrar.</p>
+        <div class="acoes"><button type="button" class="btn btn-ghost" id="btn-gerenciar-usuarios">Gerenciar usuários</button></div>
+      </section>
+
       <section id="sec-setores" class="conta-secao" hidden>
         <h3>Setores (administrador)</h3>
         <p class="dica">Lista oferecida no cadastro e na mudança de setor. Setores desativados somem das opções, mas continuam no histórico.</p>
@@ -229,6 +236,46 @@
       </form>
 
       <div class="acoes"><button type="button" class="btn btn-ghost" id="btn-conta-fechar">Fechar</button></div>
+    </div>
+  </dialog>
+
+  <!-- Gestão de usuários (só administradores; regra também no servidor) -->
+  <dialog id="dlg-usuarios" aria-labelledby="usuarios-titulo">
+    <div class="conta usuarios">
+      <h2 id="usuarios-titulo">Usuários do sistema</h2>
+      <p class="dica"><b>Administrador:</b> cadastra e desativa usuários e mantém os setores. <b>Operador:</b> cadastra e acompanha pacientes.</p>
+
+      <form id="form-usuario-novo" class="form conta-secao">
+        <h3>Cadastrar usuário</h3>
+        <div class="grid2">
+          <label class="span-all">Nome <input name="nome" maxlength="80" required placeholder="Ex.: Dra. Ana Souza – CRM 12345"></label>
+          <label>E-mail <input type="email" name="email" required autocomplete="off"></label>
+          <label>Papel
+            <select name="papel">
+              <option value="operador">Operador</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </label>
+        </div>
+        <p class="erro" hidden></p>
+        <div class="acoes"><button type="submit" class="btn btn-primary">Cadastrar</button></div>
+      </form>
+
+      <div id="usuario-senha" class="senha-temporaria" role="status" hidden>
+        <p>Senha temporária de <b data-email></b>:</p>
+        <div class="senha-linha"><code data-senha></code>
+          <button type="button" class="btn btn-ghost btn-sm" data-acao="copiar-senha">Copiar</button></div>
+        <p class="dica">Ela aparece só agora: anote e entregue <b>pessoalmente</b>. No primeiro acesso a pessoa ativa a verificação em 2 etapas e cria a própria senha.</p>
+        <div class="acoes"><button type="button" class="btn btn-ghost btn-sm" data-acao="fechar-senha">Entendi</button></div>
+      </div>
+
+      <section class="conta-secao">
+        <h3>Usuários cadastrados</h3>
+        <p class="erro" id="usuarios-erro" hidden></p>
+        <ul class="usuarios-lista" id="usuarios-lista"></ul>
+      </section>
+
+      <div class="acoes"><button type="button" class="btn btn-ghost" id="btn-usuarios-fechar">Fechar</button></div>
     </div>
   </dialog>
 
