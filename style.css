@@ -90,6 +90,32 @@ h3 { font-size: 1.02rem; margin-bottom: 12px; }
 .btn-perigo { background: var(--danger); color: #fff; }
 .btn-perigo:hover:not(:disabled) { filter: brightness(.92); }
 
+/* Anexos do paciente */
+.anexos { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.anexos > li { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid var(--border); border-radius: 10px; }
+.anexos > li.anulado .anexo-nome { text-decoration: line-through; opacity: .6; }
+.anexo-icone {
+  flex: none; width: 40px; height: 40px; border-radius: 8px; display: grid; place-items: center;
+  font-size: .7rem; font-weight: 700; letter-spacing: .03em;
+  background: var(--primary-soft); color: var(--primary);
+}
+.anexo-icone.pdf { background: var(--s-critico-bg); color: var(--s-critico-fg); }
+.anexo-info { flex: 1; min-width: 0; }
+.anexo-nome {
+  background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--primary);
+  cursor: pointer; text-align: left; overflow-wrap: anywhere;
+}
+.anexo-nome:hover { text-decoration: underline; }
+.anexo-obs { font-size: .86rem; margin-top: 2px; overflow-wrap: anywhere; }
+.anexo-acoes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.anexo-origem { display: flex; flex-wrap: wrap; gap: 8px; }
+.anexo-origem .btn { cursor: pointer; }
+@media (max-width: 599px) {
+  .anexos > li { flex-wrap: wrap; }
+  .anexo-acoes { width: 100%; justify-content: flex-start; }
+}
+.auditoria > li.aud-acesso { border-left-style: dotted; }
+
 /* Trilha de auditoria */
 #historico-alteracoes summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
 #historico-alteracoes summary::-webkit-details-marker { display: none; }

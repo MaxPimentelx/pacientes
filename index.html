@@ -295,6 +295,35 @@
     </form>
   </dialog>
 
+  <dialog id="dlg-anexo" aria-labelledby="anexo-titulo">
+    <form id="form-anexo" class="form">
+      <h2 id="anexo-titulo">Anexar arquivo</h2>
+      <p class="item-meta" id="anexo-paciente"></p>
+      <div class="anexo-origem">
+        <label class="btn btn-ghost">Escolher arquivo
+          <input type="file" id="anexo-arquivo" accept="application/pdf,image/jpeg,image/png" hidden>
+        </label>
+        <label class="btn btn-ghost">Tirar foto
+          <input type="file" id="anexo-camera" accept="image/jpeg,image/png" capture="environment" hidden>
+        </label>
+      </div>
+      <p class="item-meta" id="anexo-arquivo-info" aria-live="polite"></p>
+      <p class="item-meta">PDF, JPG ou PNG, até 10 MB. Fotos grandes são reduzidas automaticamente.</p>
+      <label>Nome do anexo *
+        <input name="nome" maxlength="120" placeholder="Ex.: Hemograma 20/11">
+      </label>
+      <label>Observação
+        <input name="observacao" maxlength="300" placeholder="Opcional">
+      </label>
+      <p class="item-meta">O anexo <b>não poderá ser apagado</b>: se for enviado por engano, poderá ser anulado com justificativa. Cada abertura fica registrada no histórico.</p>
+      <p class="erro" id="anexo-erro" hidden></p>
+      <div class="acoes">
+        <button type="button" class="btn btn-ghost" id="btn-anexo-cancelar">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Anexar</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Pré-visualização do relatório -->
   <dialog id="dlg-preview" aria-labelledby="preview-titulo">
     <div class="preview-barra">

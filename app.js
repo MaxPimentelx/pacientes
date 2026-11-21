@@ -213,6 +213,37 @@
 
   const textoProcedimento = pr => [pr.codigo, pr.descricao].filter(Boolean).join(' – ');
 
+  // ------------------------------------------------------------------
+  // Anexos: formatos aceitos, tamanho e redução de fotos antes do envio
+  // ------------------------------------------------------------------
+  const FORMATOS_ANEXO = { 'application/pdf': 'PDF', 'image/jpeg': 'Foto', 'image/png': 'Imagem' };
+  const LIMITE_ANEXO = 10 * 1024 * 1024; // 10 MB (mesmo limite do Storage)
+  const fmtBytes = n => n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} MB`
+    : `${Math.max(1, Math.round(n / 1024))} KB`;
+
+  // fotos grandes viram JPEG de até 2000 px (~300–800 KB); PDF vai como está
+  async function prepararArquivo(arquivo) {
+    if (!FORMATOS_ANEXO[arquivo.type]) throw new Error('Tipo de arquivo não aceito. Envie PDF, JPG ou PNG.');
+    if (arquivo.type === 'application/pdf' || arquivo.size <= 1024 * 1024) return arquivo;
+    try {
+      const img = await createImageBitmap(arquivo);
+      const escala = Math.min(1, 2000 / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * escala);
+      canvas.height = Math.round(img.height * escala);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff'; // PNG com transparência: fundo branco
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      img.close?.();
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85));
+      if (!blob || blob.size >= arquivo.size) return arquivo;
+      return new File([blob], arquivo.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+    } catch {
+      return arquivo; // navegador sem suporte: envia o original
+    }
+  }
+
   // Lista editável de procedimentos (código opcional + descrição)
   function montarProcedimentos(raiz) {
     raiz.innerHTML = `
@@ -419,6 +450,8 @@
     if (/internacoes_uma_aberta|uma internação aberta/i.test(m)) return 'Este paciente já tem uma internação em andamento. Registre a alta antes de abrir outra.';
     if (/setores_nome_key|duplicate key.*setores/i.test(m)) return 'Já existe um setor com esse nome.';
     if (/internacoes_previsao_apos_entrada/i.test(m)) return 'A previsão de alta não pode ser anterior à entrada.';
+    if (/mime type|invalid_mime|not supported/i.test(m)) return 'Tipo de arquivo não aceito. Envie PDF, JPG ou PNG.';
+    if (/payload too large|maximum allowed size|entity too large|413/i.test(m)) return 'Arquivo grande demais: o limite é 10 MB.';
     return m;
   }
 
@@ -546,6 +579,35 @@
           .order('ocorrido_em', { ascending: false }).limit(300));
       },
 
+      // --- Anexos (arquivo no Storage privado + registro na tabela) ---
+      async listarAnexos(pid) {
+        return ok(await sb.from('anexos').select('*').eq('paciente_id', pid).order('criado_em', { ascending: false }));
+      },
+      async enviarAnexo(pid, arquivo, nome, observacao) {
+        const ext = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' }[arquivo.type];
+        const caminho = `${pid}/${crypto.randomUUID()}.${ext}`;
+        ok(await sb.storage.from('anexos').upload(caminho, arquivo, { contentType: arquivo.type, upsert: false }));
+        // formato e tamanho reais são gravados pelo banco a partir do Storage
+        return ok(await sb.from('anexos').insert({
+          paciente_id: pid, caminho, nome_arquivo: nome, observacao: observacao || null,
+          formato: arquivo.type, tamanho: arquivo.size
+        }).select().single());
+      },
+      // abrir passa pelo servidor: confere a permissão e registra quem abriu
+      async abrirAnexo(id, baixar) {
+        const { data, error } = await sb.functions.invoke('anexos', { body: { acao: 'abrir', id, baixar: !!baixar } });
+        if (error) {
+          let msg = error.message;
+          try { msg = (await error.context.json()).erro || msg; } catch { /* sem corpo */ }
+          throw new Error(msg);
+        }
+        return data.url;
+      },
+      async anularAnexo(id, motivo) {
+        const linhas = ok(await sb.from('anexos').update({ motivo_anulacao: motivo }).eq('id', id).select('id'));
+        if (!linhas?.length) throw new Error('Este anexo já foi anulado.');
+      },
+
       // --- Setores (edição só por administradores; regra no banco) ---
       async listarSetores() { return ok(await sb.from('setores').select('*').order('ordem').order('nome')); },
       async salvarSetor(s) {
@@ -561,6 +623,7 @@
     try { mem = JSON.parse(localStorage.getItem(CHAVE)); } catch { mem = null; }
     if (!mem || !Array.isArray(mem.pacientes)) mem = { pacientes: [], evolucoes: [] };
     if (!Array.isArray(mem.auditoria)) mem.auditoria = [];
+    const anexosDemo = [];
     const gravar = () => { try { localStorage.setItem(CHAVE, JSON.stringify(mem)); } catch { /* sem storage */ } };
     const novoId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
     const agora = () => new Date().toISOString();
@@ -769,6 +832,49 @@
       async listarAuditoria(pid) {
         return mem.auditoria.filter(a => a.paciente_id === pid)
           .sort((a, b) => b.ocorrido_em.localeCompare(a.ocorrido_em));
+      },
+
+      // anexos da demonstração ficam só na memória (somem ao recarregar a página)
+      async listarAnexos(pid) {
+        return anexosDemo.filter(a => a.paciente_id === pid).sort((a, b) => b.criado_em.localeCompare(a.criado_em));
+      },
+      async enviarAnexo(pid, arquivo, nome, observacao) {
+        if (!FORMATOS_ANEXO[arquivo.type]) throw new Error('Tipo de arquivo não aceito. Envie PDF, JPG ou PNG.');
+        if (arquivo.size > LIMITE_ANEXO) throw new Error('Arquivo grande demais: o limite é 10 MB.');
+        const a = {
+          id: novoId(), paciente_id: pid, nome_arquivo: nome.trim(), formato: arquivo.type, tamanho: arquivo.size,
+          observacao: (observacao || '').trim() || null, ...criacao(), _url: URL.createObjectURL(arquivo)
+        };
+        anexosDemo.push(a);
+        auditar('anexos', { id: a.id, nome_arquivo: a.nome_arquivo, formato: a.formato, tamanho: a.tamanho, observacao: a.observacao }, pid, 'cadastro');
+        gravar();
+        return a;
+      },
+      async abrirAnexo(id) {
+        const a = anexosDemo.find(x => x.id === id);
+        if (!a) throw new Error('Anexo não encontrado.');
+        mem.auditoria.push({
+          id: novoId(), ocorrido_em: agora(), tabela: 'anexos', registro_id: a.id, paciente_id: a.paciente_id, acao: 'acesso',
+          usuario_id: usuarioDemo.id, usuario_nome: usuarioDemo.nome, usuario_email: usuarioDemo.email, alteracoes: {}
+        });
+        gravar();
+        return a._url;
+      },
+      async anularAnexo(id, motivo) {
+        const a = anexosDemo.find(x => x.id === id);
+        if (!a) throw new Error('Anexo não encontrado.');
+        if (a.anulada_em) throw new Error('Este anexo já foi anulado.');
+        if ((motivo || '').trim().length < 10) throw new Error('Informe a justificativa da anulação (mínimo de 10 caracteres).');
+        Object.assign(a, {
+          anulada_em: agora(), anulada_por: usuarioDemo.id, anulada_por_nome: usuarioDemo.nome,
+          anulada_por_email: usuarioDemo.email, motivo_anulacao: motivo.trim()
+        });
+        mem.auditoria.push({
+          id: novoId(), ocorrido_em: agora(), tabela: 'anexos', registro_id: a.id, paciente_id: a.paciente_id, acao: 'anulacao',
+          usuario_id: usuarioDemo.id, usuario_nome: usuarioDemo.nome, usuario_email: usuarioDemo.email,
+          alteracoes: { motivo_anulacao: { de: null, para: a.motivo_anulacao } }
+        });
+        gravar();
       },
       async listarSetores() {
         return mem.setores.slice().sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome, 'pt-BR'));
@@ -1595,6 +1701,14 @@
         <div class="autoria">${linhaAutoria('Paciente cadastrado por', p.criado_por_nome, p.criado_por_email, p.criado_em)}</div>
       </div>
 
+      <section class="card anexos-card">
+        <div class="internacoes-topo">
+          <h3>Anexos <span class="anexos-total"></span></h3>
+          <button type="button" class="btn btn-primary btn-sm" data-acao="anexar">+ Anexar arquivo</button>
+        </div>
+        <div class="anexos-lista"><p class="item-meta">Carregando…</p></div>
+      </section>
+
       <section class="card internacoes-card">
         <div class="internacoes-topo">
           <h3>Internações (${internacoes.length})</h3>
@@ -1698,6 +1812,8 @@
       aplicarTipoRegistro(formEvo);
     }
 
+    carregarAnexos(p.id);
+
     // trilha de auditoria: carrega só quando a seção é aberta
     const det = $('#historico-alteracoes', elDetalhe);
     det.addEventListener('toggle', () => {
@@ -1713,6 +1829,125 @@
   }
 
   // ------------------------------------------------------------------
+  // Anexos do paciente (PDF e fotos)
+  // ------------------------------------------------------------------
+  async function carregarAnexos(pid) {
+    const alvo = $('.anexos-lista', elDetalhe);
+    if (!alvo) return;
+    try {
+      const lista = await db.listarAnexos(pid);
+      if (estado.selecionado !== pid) return;
+      elDetalhe._anexos = lista;
+      const validos = lista.filter(a => !a.anulada_em).length;
+      const anulados = lista.length - validos;
+      $('.anexos-total', elDetalhe).textContent = `(${validos}${anulados ? ` + ${anulados} anulado${anulados === 1 ? '' : 's'}` : ''})`;
+      alvo.innerHTML = !lista.length
+        ? '<p class="item-meta">Nenhum arquivo anexado. Use <b>+ Anexar arquivo</b> para incluir exames, laudos ou fotos (PDF, JPG ou PNG, até 10 MB).</p>'
+        : `<ul class="anexos">${lista.map(a => `
+            <li class="${a.anulada_em ? 'anulado' : ''}">
+              <span class="anexo-icone ${a.formato === 'application/pdf' ? 'pdf' : 'img'}" aria-hidden="true">${a.formato === 'application/pdf' ? 'PDF' : 'IMG'}</span>
+              <div class="anexo-info">
+                <button type="button" class="anexo-nome" data-acao="abrir-anexo" data-id="${esc(a.id)}" title="Abrir">${esc(a.nome_arquivo)}</button>
+                ${a.anulada_em ? '<span class="pill s-anulada">Anulado</span>' : ''}
+                ${a.observacao ? `<div class="anexo-obs">${esc(a.observacao)}</div>` : ''}
+                <div class="tl-autor">${esc(FORMATOS_ANEXO[a.formato] || a.formato)} · ${fmtBytes(a.tamanho)} · ${linhaAutoria('enviado por', a.criado_por_nome, a.criado_por_email, a.criado_em)}</div>
+                ${a.anulada_em ? `
+                  <div class="aviso-anulacao">
+                    ${linhaAutoria('Anulado por', a.anulada_por_nome, a.anulada_por_email, a.anulada_em)}
+                    <br>Justificativa: <span class="texto">${esc(a.motivo_anulacao)}</span>
+                  </div>` : ''}
+              </div>
+              <div class="anexo-acoes">
+                <button type="button" class="btn btn-ghost btn-sm" data-acao="abrir-anexo" data-id="${esc(a.id)}">Abrir</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-acao="baixar-anexo" data-id="${esc(a.id)}">Baixar</button>
+                ${!a.anulada_em ? `<button type="button" class="link-excluir" data-acao="anular-anexo" data-id="${esc(a.id)}">Anular</button>` : ''}
+              </div>
+            </li>`).join('')}</ul>`;
+    } catch (e) {
+      alvo.innerHTML = `<p class="erro">Erro ao carregar os anexos: ${esc(msgErro(e))}</p>`;
+    }
+  }
+
+  // abre (ou baixa) pelo servidor, que registra o acesso e devolve um link de 2 minutos
+  async function abrirAnexo(id, baixar) {
+    // a janela é aberta já no clique, para o navegador não bloquear como pop-up
+    const janela = baixar ? null : window.open('', '_blank');
+    if (janela) janela.document.write('<p style="font-family:sans-serif">Abrindo o anexo…</p>');
+    try {
+      const url = await db.abrirAnexo(id, baixar);
+      if (janela) { janela.opener = null; janela.location.replace(url); }
+      else if (baixar) {
+        const a = document.createElement('a');
+        a.href = url; a.rel = 'noopener';
+        a.download = (elDetalhe._anexos || []).find(x => x.id === id)?.nome_arquivo || '';
+        document.body.appendChild(a); a.click(); a.remove();
+      } else location.href = url;
+      const det = $('#historico-alteracoes', elDetalhe);
+      if (det?.open) {
+        const p = elDetalhe._pessoa;
+        carregarAuditoria(p.id, elDetalhe._evolucoes || [], p.internacoes || [], det.querySelector('.auditoria-lista'));
+      }
+    } catch (e) {
+      janela?.close();
+      toast('Não foi possível abrir o anexo: ' + msgErro(e));
+    }
+  }
+
+  const dlgAnexo = $('#dlg-anexo');
+  const formAnexo = $('#form-anexo');
+  let arquivoEscolhido = null;
+
+  function abrirEnvioAnexo() {
+    formAnexo.reset();
+    arquivoEscolhido = null;
+    $('#anexo-erro').hidden = true;
+    $('#anexo-arquivo-info').textContent = '';
+    $('#anexo-paciente').textContent = elDetalhe._pessoa?.nome || '';
+    dlgAnexo.showModal();
+  }
+  $('#btn-anexo-cancelar').addEventListener('click', () => dlgAnexo.close());
+
+  // "Escolher arquivo" e "Tirar foto" preenchem o mesmo envio
+  for (const campo of ['#anexo-arquivo', '#anexo-camera']) {
+    $(campo).addEventListener('change', ev => {
+      arquivoEscolhido = ev.target.files[0] || null;
+      const info = $('#anexo-arquivo-info');
+      $('#anexo-erro').hidden = true;
+      if (!arquivoEscolhido) { info.textContent = ''; return; }
+      info.textContent = `Selecionado: ${arquivoEscolhido.name} · ${fmtBytes(arquivoEscolhido.size)}`;
+      const nome = formAnexo.elements.nome;
+      if (!nome.value.trim()) nome.value = arquivoEscolhido.name.replace(/\.[^.]+$/, '').slice(0, 120);
+    });
+  }
+
+  formAnexo.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const erro = $('#anexo-erro');
+    const falhar = m => { erro.textContent = m; erro.hidden = false; };
+    if (!arquivoEscolhido) return falhar('Escolha um arquivo ou tire uma foto.');
+    const nome = formAnexo.elements.nome.value.trim();
+    if (!nome) return falhar('Dê um nome ao anexo (ex.: Hemograma 20/11).');
+    const botao = formAnexo.querySelector('[type=submit]');
+    botao.disabled = true;
+    botao.textContent = 'Enviando…';
+    try {
+      const arquivo = await prepararArquivo(arquivoEscolhido);
+      if (arquivo.size > LIMITE_ANEXO) throw new Error('Arquivo grande demais: o limite é 10 MB.');
+      const ext = { 'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png' }[arquivo.type];
+      const nomeFinal = nome.toLowerCase().endsWith(ext) ? nome : nome + ext;
+      await db.enviarAnexo(elDetalhe._pessoa.id, arquivo, nomeFinal, formAnexo.elements.observacao.value.trim());
+      dlgAnexo.close();
+      toast('Arquivo anexado.');
+      carregarAnexos(elDetalhe._pessoa.id);
+    } catch (e) {
+      falhar('Não foi possível anexar: ' + msgErro(e));
+    } finally {
+      botao.disabled = false;
+      botao.textContent = 'Anexar';
+    }
+  });
+
+  // ------------------------------------------------------------------
   // Histórico de alterações (tabela "auditoria", gravada pelo banco)
   // ------------------------------------------------------------------
   const ROTULO_CAMPO = {
@@ -1723,7 +1958,8 @@
     data: 'Data', status: 'Situação', descricao: 'Evolução', cids: 'CIDs', cids_tipos: 'Classificação dos CIDs',
     procedimentos: 'Procedimentos', anulada_em: 'Anulada em', motivo_anulacao: 'Justificativa da anulação',
     tipo: 'Tipo de registro', setor: 'Setor', leito: 'Leito', intercorrencia: 'Intercorrência',
-    previsao_alta: 'Previsão de alta', pendencias_alta: 'Pendências para a alta'
+    previsao_alta: 'Previsão de alta', pendencias_alta: 'Pendências para a alta',
+    nome_arquivo: 'Arquivo', formato: 'Formato', tamanho: 'Tamanho', observacao: 'Observação'
   };
 
   function fmtValorAuditoria(campo, v) {
@@ -1737,6 +1973,8 @@
       return pares.length ? pares.join(', ') : '(vazio)';
     }
     if (campo === 'sexo') return SEXO[v] || v;
+    if (campo === 'formato') return FORMATOS_ANEXO[v] || v;
+    if (campo === 'tamanho' && typeof v === 'number') return fmtBytes(v);
     if (campo === 'tipo') return TIPOS_REGISTRO[v] || v;
     if (campo === 'tipo_alta') return ROTULO_ALTA[v] || v;
     if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return fmtData(v);
@@ -1745,7 +1983,13 @@
     return t.length > 300 ? t.slice(0, 299) + '…' : t;
   }
 
-  function descricaoAcao(a, evsPorId, intPorId) {
+  function descricaoAcao(a, evsPorId, intPorId, anexosPorId) {
+    if (a.tabela === 'anexos') {
+      const nome = anexosPorId.get(a.registro_id)?.nome_arquivo;
+      const qual = nome ? ` "${nome}"` : '';
+      if (a.acao === 'acesso') return `${a.alteracoes?.modo === 'download' ? 'Baixou' : 'Abriu'} o anexo${qual}`;
+      return { cadastro: 'Anexou o arquivo', anulacao: 'Anulou o anexo', alteracao: 'Alterou o anexo' }[a.acao] + qual;
+    }
     if (a.tabela === 'pacientes') return a.acao === 'cadastro' ? 'Cadastrou o paciente' : 'Alterou os dados do paciente';
     if (a.tabela === 'internacoes') {
       const i = intPorId.get(a.registro_id);
@@ -1760,18 +2004,19 @@
 
   async function carregarAuditoria(pid, evs, internacoes, alvo) {
     try {
-      const lista = await db.listarAuditoria(pid);
+      const [lista, anexos] = await Promise.all([db.listarAuditoria(pid), db.listarAnexos(pid).catch(() => [])]);
       const porId = new Map(evs.map(e => [e.id, e]));
       const intPorId = new Map((internacoes || []).map(i => [i.id, i]));
+      const anexosPorId = new Map(anexos.map(x => [x.id, x]));
       alvo.innerHTML = !lista.length
         ? '<p class="item-meta">Nenhum registro na trilha de auditoria.</p>'
         : `<ol class="auditoria">${lista.map(a => `
             <li class="aud-${esc(a.acao)}">
               <div class="aud-topo">
-                <b>${esc(descricaoAcao(a, porId, intPorId))}</b>
+                <b>${esc(descricaoAcao(a, porId, intPorId, anexosPorId))}</b>
                 <span class="item-meta">${fmtDataHora(a.ocorrido_em)} · ${esc(autor(a.usuario_nome, a.usuario_email))}</span>
               </div>
-              ${Object.keys(a.alteracoes || {}).length ? `
+              ${a.acao !== 'acesso' && Object.keys(a.alteracoes || {}).length ? `
                 <ul class="aud-campos">${Object.entries(a.alteracoes).map(([campo, m]) => `
                   <li><span>${esc(ROTULO_CAMPO[campo] || campo)}:</span>
                     ${'de' in m ? `<s>${esc(fmtValorAuditoria(campo, m.de))}</s> → ` : ''}<b>${esc(fmtValorAuditoria(campo, m.para))}</b></li>`).join('')}
@@ -2197,6 +2442,10 @@
     else if (acao === 'ver-internacao') irPara(estado.selecionado, alvo.dataset.id);
     else if (acao === 'imprimir') previewPaciente();
     else if (acao === 'anular-evo') abrirAnulacao(alvo.dataset.id, alvo.dataset.data);
+    else if (acao === 'anexar') abrirEnvioAnexo();
+    else if (acao === 'abrir-anexo') abrirAnexo(alvo.dataset.id, false);
+    else if (acao === 'baixar-anexo') abrirAnexo(alvo.dataset.id, true);
+    else if (acao === 'anular-anexo') abrirAnulacaoAnexo(alvo.dataset.id);
   });
 
   // ------------------------------------------------------------------
@@ -2205,9 +2454,29 @@
   const dlgAnular = $('#dlg-anular');
   const formAnular = $('#form-anular');
   let anulandoId = null;
+  let anulandoAnexo = false;
+
+  function rotularAnulacao(oQue) {
+    $('#anular-titulo').textContent = `Anular ${oQue}`;
+    formAnular.querySelector('[type=submit]').textContent = `Anular ${oQue}`;
+  }
+
+  function abrirAnulacaoAnexo(id) {
+    const a = (elDetalhe._anexos || []).find(x => x.id === id);
+    anulandoId = id;
+    anulandoAnexo = true;
+    rotularAnulacao('anexo');
+    formAnular.reset();
+    $('#anular-erro').hidden = true;
+    $('#anular-info').textContent = `${a?.nome_arquivo || 'Anexo'} · ${elDetalhe._pessoa?.nome || ''}`;
+    dlgAnular.showModal();
+    formAnular.elements.motivo.focus();
+  }
 
   function abrirAnulacao(id, data) {
     anulandoId = id;
+    anulandoAnexo = false;
+    rotularAnulacao('evolução');
     formAnular.reset();
     $('#anular-erro').hidden = true;
     const ev = (elDetalhe._evolucoes || []).find(e => e.id === id);
@@ -2229,6 +2498,13 @@
     const botao = formAnular.querySelector('[type=submit]');
     botao.disabled = true;
     try {
+      if (anulandoAnexo) {
+        await db.anularAnexo(anulandoId, motivo);
+        dlgAnular.close();
+        toast('Anexo anulado. O registro continua no histórico.');
+        carregarAnexos(elDetalhe._pessoa.id);
+        return;
+      }
       await db.anularEvolucao(anulandoId, motivo);
       dlgAnular.close();
       toast('Evolução anulada. O registro continua no histórico.');
