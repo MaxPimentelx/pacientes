@@ -13,7 +13,7 @@ App web (funciona em celular, tablet e computador) para:
 
 > A tabela `cid10.json` foi gerada a partir dos arquivos oficiais da CID-10 do **DATASUS** (CID10CSV.zip). A **atribuição do diagnóstico é responsabilidade do médico**; o app apenas registra o código informado.
 
-Banco de dados: **Supabase**. Hospedagem: **Cloudflare Pages**, publicado automaticamente a partir do GitHub.
+Banco de dados: **Supabase**. Hospedagem: **Cloudflare** (Workers, arquivos estáticos), publicado automaticamente a partir do GitHub.
 
 ---
 
@@ -34,8 +34,8 @@ Banco de dados: **Supabase**. Hospedagem: **Cloudflare Pages**, publicado automa
 
 | Ambiente | Onde roda | Banco (Supabase) |
 |---|---|---|
-| **Produção** | só os endereços listados em `PRODUCAO_HOSTS` ([config.js](config.js)): `controle-pacientes.pages.dev` (e o Netlify antigo, até ser desligado) | projeto **Pacientes** |
-| **Homologação** | qualquer outro endereço: `localhost`, `homologacao.controle-pacientes.pages.dev` e as prévias do Cloudflare | projeto **Pacientes-Homologacao** |
+| **Produção** | só os endereços listados em `PRODUCAO_HOSTS` ([config.js](config.js)): `pacientes.chamados-fractal.workers.dev` (e o Netlify antigo, até ser desligado) | projeto **Pacientes** |
+| **Homologação** | qualquer outro endereço: `localhost` e as prévias do Cloudflare (`homologacao-pacientes.…workers.dev`, `<versão>-pacientes.…workers.dev`) | projeto **Pacientes-Homologacao** |
 | **Demonstração** | qualquer endereço com `?demo=1` | nenhum (dados só no navegador) |
 
 A escolha é automática pelo endereço ([config.js](config.js)); endereço desconhecido nunca usa o banco de produção. Ao ganhar um domínio próprio, inclua-o em `PRODUCAO_HOSTS` e nas origens da função `usuarios`. Em homologação aparece uma faixa vermelha no topo. **Toda mudança é testada em homologação antes de ir para produção.** Na homologação, `?inatividade=1` encurta a saída automática para 1 minuto, para teste.
@@ -66,9 +66,9 @@ Configurações que ficam no painel do Supabase (fazer nos **dois** projetos):
 
 ## Publicação
 
-O Cloudflare Pages publica sozinho a cada envio ao GitHub: a branch `main` vai para produção (`controle-pacientes.pages.dev`) e a branch `homologacao` vira o site de testes (`homologacao.controle-pacientes.pages.dev`). Os cabeçalhos de segurança ficam em [_headers](_headers).
+O Cloudflare publica sozinho a cada envio ao GitHub ([wrangler.jsonc](wrangler.jsonc)): a branch `main` vai para produção (`pacientes.chamados-fractal.workers.dev`); as outras branches, como `homologacao`, geram prévias que usam o banco de homologação. Os cabeçalhos de segurança ficam em [_headers](_headers) e o que não deve ser publicado (scripts do banco, documentação) fica em [.assetsignore](.assetsignore).
 
-Configuração do projeto no Cloudflare (*Workers & Pages → Create → Pages → Import an existing Git repository*): repositório `pacientes`, nome do projeto `controle-pacientes`, *Framework preset* **None**, *Build command* **vazio**, *Build output directory* **`/`**, branch de produção **`main`**.
+Configuração no Cloudflare (*Compute → Workers & Pages → Create application → Import a repository*): repositório `pacientes`, *Project name* **`pacientes`** (igual ao `name` do `wrangler.jsonc`), *Build command* **vazio**, *Deploy command* `npx wrangler deploy`.
 
 O [netlify.toml](netlify.toml) só serve ao endereço antigo do Netlify e sai quando ele for desligado.
 
@@ -97,6 +97,7 @@ O [netlify.toml](netlify.toml) só serve ao endereço antigo do Netlify e sai qu
 | `.github/workflows/backup-diario.yml` | Backup diário criptografado |
 | `.github/workflows/manter-ativo.yml` | Consulta diária que evita a pausa do Supabase gratuito |
 | `docs/BACKUP.md` | Como configurar, baixar e restaurar backups |
-| `_headers` | Cabeçalhos de segurança (Cloudflare Pages) |
+| `wrangler.jsonc` / `.assetsignore` | Publicação no Cloudflare e o que fica de fora |
+| `_headers` | Cabeçalhos de segurança (Cloudflare) |
 | `netlify.toml` | Publicação no Netlify antigo (até ser desligado) |
 | `manifest.webmanifest`, `icon.svg` | Permite instalar na tela inicial |

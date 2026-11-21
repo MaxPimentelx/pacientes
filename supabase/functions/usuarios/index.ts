@@ -16,10 +16,10 @@ const PAPEIS = ['admin', 'operador'];
 const DESATIVADO = '876000h'; // ~100 anos
 
 // só o app oficial e os sites de teste chamam esta função
-const PRINCIPAL = 'https://controle-pacientes.pages.dev';
+const PRINCIPAL = 'https://pacientes.chamados-fractal.workers.dev';
 const ORIGENS = [
-  /^https:\/\/controle-pacientes\.pages\.dev$/,
-  /^https:\/\/[a-z0-9-]+\.controle-pacientes\.pages\.dev$/, // homologacao e prévias
+  /^https:\/\/pacientes\.chamados-fractal\.workers\.dev$/,
+  /^https:\/\/[a-z0-9-]+-pacientes\.chamados-fractal\.workers\.dev$/, // homologacao e prévias
   /^https:\/\/timely-cannoli-9571b6\.netlify\.app$/,
   /^https:\/\/(homologacao|deploy-preview-\d+)--timely-cannoli-9571b6\.netlify\.app$/,
   /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,

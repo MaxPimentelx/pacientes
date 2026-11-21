@@ -3,8 +3,8 @@
 //
 //  - producao:    SOMENTE os endereços listados em PRODUCAO_HOSTS
 //  - homologacao: qualquer outro endereço (localhost, sites de teste do
-//                 Cloudflare Pages "homologacao.controle-pacientes.pages.dev",
-//                 prévias "<código>.controle-pacientes.pages.dev", etc.)
+//                 Cloudflare "<branch-ou-versao>-pacientes.chamados-fractal.workers.dev",
+//                 etc.)
 //
 // Endereço desconhecido NUNCA usa o banco de produção: para um endereço
 // novo virar produção (ex.: domínio próprio), inclua-o em PRODUCAO_HOSTS.
@@ -24,7 +24,7 @@
   };
 
   const PRODUCAO_HOSTS = [
-    'controle-pacientes.pages.dev',   // Cloudflare Pages (branch main)
+    'pacientes.chamados-fractal.workers.dev', // Cloudflare (branch main)
     'timely-cannoli-9571b6.netlify.app' // Netlify antigo (até ser desligado)
   ];
 

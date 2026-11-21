@@ -1,4 +1,4 @@
-# Cabeçalhos de segurança no Cloudflare Pages (app com dados de saúde)
+# Cabeçalhos de segurança no Cloudflare (app com dados de saúde)
 /*
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff

@@ -1,0 +1,13 @@
+# Arquivos do repositório que NÃO vão para o site publicado
+.git
+.github
+.gitignore
+.assetsignore
+.netlify
+.wrangler
+node_modules
+supabase
+docs
+README.md
+netlify.toml
+wrangler.jsonc

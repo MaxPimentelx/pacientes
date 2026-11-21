@@ -1,0 +1,9 @@
+// Publicação no Cloudflare (Workers com arquivos estáticos).
+// Site 100% estático: não há código de servidor nem etapa de build.
+{
+  "name": "pacientes",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "."
+  }
+}
