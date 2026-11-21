@@ -1,9 +1,13 @@
 // Ambientes do app. As chaves abaixo são PUBLICÁVEIS (podem ficar no código):
 // quem protege os dados são as regras de segurança (RLS) de cada banco.
 //
-//  - producao:    site oficial no Netlify (endereço principal)
-//  - homologacao: computador local (localhost) e sites de teste do Netlify
-//                 (branch "homologacao--..." e "deploy-preview-...--...")
+//  - producao:    SOMENTE os endereços listados em PRODUCAO_HOSTS
+//  - homologacao: qualquer outro endereço (localhost, sites de teste do
+//                 Cloudflare Pages "homologacao.controle-pacientes.pages.dev",
+//                 prévias "<código>.controle-pacientes.pages.dev", etc.)
+//
+// Endereço desconhecido NUNCA usa o banco de produção: para um endereço
+// novo virar produção (ex.: domínio próprio), inclua-o em PRODUCAO_HOSTS.
 //
 // Para rodar SEM banco (modo demonstração, dados só no navegador),
 // abra o app com ?demo=1 no endereço.
@@ -19,10 +23,13 @@
     }
   };
 
+  const PRODUCAO_HOSTS = [
+    'controle-pacientes.pages.dev',   // Cloudflare Pages (branch main)
+    'timely-cannoli-9571b6.netlify.app' // Netlify antigo (até ser desligado)
+  ];
+
   const host = location.hostname;
-  const ehTeste =
-    host === 'localhost' || host === '127.0.0.1' || host === '' ||
-    /^(homologacao|deploy-preview-\d+)--/.test(host);
+  const ehTeste = !PRODUCAO_HOSTS.includes(host);
 
   const params = new URLSearchParams(location.search);
   if (params.has('demo')) {

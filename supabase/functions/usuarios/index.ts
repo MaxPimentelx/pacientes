@@ -16,7 +16,10 @@ const PAPEIS = ['admin', 'operador'];
 const DESATIVADO = '876000h'; // ~100 anos
 
 // só o app oficial e os sites de teste chamam esta função
+const PRINCIPAL = 'https://controle-pacientes.pages.dev';
 const ORIGENS = [
+  /^https:\/\/controle-pacientes\.pages\.dev$/,
+  /^https:\/\/[a-z0-9-]+\.controle-pacientes\.pages\.dev$/, // homologacao e prévias
   /^https:\/\/timely-cannoli-9571b6\.netlify\.app$/,
   /^https:\/\/(homologacao|deploy-preview-\d+)--timely-cannoli-9571b6\.netlify\.app$/,
   /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
@@ -24,7 +27,7 @@ const ORIGENS = [
 function cabecalhos(req: Request) {
   const origem = req.headers.get('Origin') || '';
   return {
-    'Access-Control-Allow-Origin': ORIGENS.some((r) => r.test(origem)) ? origem : 'https://timely-cannoli-9571b6.netlify.app',
+    'Access-Control-Allow-Origin': ORIGENS.some((r) => r.test(origem)) ? origem : PRINCIPAL,
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Vary': 'Origin',

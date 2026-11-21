@@ -13,7 +13,7 @@ App web (funciona em celular, tablet e computador) para:
 
 > A tabela `cid10.json` foi gerada a partir dos arquivos oficiais da CID-10 do **DATASUS** (CID10CSV.zip). A **atribuição do diagnóstico é responsabilidade do médico**; o app apenas registra o código informado.
 
-Banco de dados: **Supabase**. Hospedagem: **Netlify**, publicado automaticamente a partir do GitHub.
+Banco de dados: **Supabase**. Hospedagem: **Cloudflare Pages**, publicado automaticamente a partir do GitHub.
 
 ---
 
@@ -34,11 +34,11 @@ Banco de dados: **Supabase**. Hospedagem: **Netlify**, publicado automaticamente
 
 | Ambiente | Onde roda | Banco (Supabase) |
 |---|---|---|
-| **Produção** | site oficial no Netlify | projeto **Pacientes** |
-| **Homologação** | `localhost` e sites de teste do Netlify (`homologacao--…`, `deploy-preview-…`) | projeto **Pacientes-Homologacao** |
+| **Produção** | só os endereços listados em `PRODUCAO_HOSTS` ([config.js](config.js)): `controle-pacientes.pages.dev` (e o Netlify antigo, até ser desligado) | projeto **Pacientes** |
+| **Homologação** | qualquer outro endereço: `localhost`, `homologacao.controle-pacientes.pages.dev` e as prévias do Cloudflare | projeto **Pacientes-Homologacao** |
 | **Demonstração** | qualquer endereço com `?demo=1` | nenhum (dados só no navegador) |
 
-A escolha é automática pelo endereço ([config.js](config.js)). Em homologação aparece uma faixa vermelha no topo. **Toda mudança é testada em homologação antes de ir para produção.** Na homologação, `?inatividade=1` encurta a saída automática para 1 minuto, para teste.
+A escolha é automática pelo endereço ([config.js](config.js)); endereço desconhecido nunca usa o banco de produção. Ao ganhar um domínio próprio, inclua-o em `PRODUCAO_HOSTS` e nas origens da função `usuarios`. Em homologação aparece uma faixa vermelha no topo. **Toda mudança é testada em homologação antes de ir para produção.** Na homologação, `?inatividade=1` encurta a saída automática para 1 minuto, para teste.
 
 ### Rodar no computador
 
@@ -66,7 +66,11 @@ Configurações que ficam no painel do Supabase (fazer nos **dois** projetos):
 
 ## Publicação
 
-O Netlify publica sozinho a cada envio ao GitHub ([netlify.toml](netlify.toml)): a branch `main` vai para produção e a branch `homologacao` vira o site de testes.
+O Cloudflare Pages publica sozinho a cada envio ao GitHub: a branch `main` vai para produção (`controle-pacientes.pages.dev`) e a branch `homologacao` vira o site de testes (`homologacao.controle-pacientes.pages.dev`). Os cabeçalhos de segurança ficam em [_headers](_headers).
+
+Configuração do projeto no Cloudflare (*Workers & Pages → Create → Pages → Import an existing Git repository*): repositório `pacientes`, nome do projeto `controle-pacientes`, *Framework preset* **None**, *Build command* **vazio**, *Build output directory* **`/`**, branch de produção **`main`**.
+
+O [netlify.toml](netlify.toml) só serve ao endereço antigo do Netlify e sai quando ele for desligado.
 
 ## Usar no celular como aplicativo
 
@@ -93,5 +97,6 @@ O Netlify publica sozinho a cada envio ao GitHub ([netlify.toml](netlify.toml)):
 | `.github/workflows/backup-diario.yml` | Backup diário criptografado |
 | `.github/workflows/manter-ativo.yml` | Consulta diária que evita a pausa do Supabase gratuito |
 | `docs/BACKUP.md` | Como configurar, baixar e restaurar backups |
-| `netlify.toml` | Publicação e cabeçalhos de segurança |
+| `_headers` | Cabeçalhos de segurança (Cloudflare Pages) |
+| `netlify.toml` | Publicação no Netlify antigo (até ser desligado) |
 | `manifest.webmanifest`, `icon.svg` | Permite instalar na tela inicial |
