@@ -14,3 +14,4 @@ desktop.ini
 .env.*
 *.pem
 *service_role*
+.wrangler/
