@@ -6,7 +6,6 @@ desktop.ini
 .idea/
 
 # Pastas de deploy locais
-.netlify/
 .vercel/
 
 # Nunca versionar segredos (a chave publicável em config.js pode ficar)

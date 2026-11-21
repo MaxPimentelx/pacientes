@@ -24,8 +24,7 @@
   };
 
   const PRODUCAO_HOSTS = [
-    'pacientes.chamados-fractal.workers.dev', // Cloudflare (branch main)
-    'timely-cannoli-9571b6.netlify.app' // Netlify antigo (até ser desligado)
+    'pacientes.chamados-fractal.workers.dev' // Cloudflare (branch main)
   ];
 
   const host = location.hostname;

@@ -34,7 +34,7 @@ Banco de dados: **Supabase**. Hospedagem: **Cloudflare** (Workers, arquivos est�
 
 | Ambiente | Onde roda | Banco (Supabase) |
 |---|---|---|
-| **Produção** | só os endereços listados em `PRODUCAO_HOSTS` ([config.js](config.js)): `pacientes.chamados-fractal.workers.dev` (e o Netlify antigo, até ser desligado) | projeto **Pacientes** |
+| **Produção** | só os endereços listados em `PRODUCAO_HOSTS` ([config.js](config.js)): `pacientes.chamados-fractal.workers.dev` | projeto **Pacientes** |
 | **Homologação** | qualquer outro endereço: `localhost` e as prévias do Cloudflare (`homologacao-pacientes.…workers.dev`, `<versão>-pacientes.…workers.dev`) | projeto **Pacientes-Homologacao** |
 | **Demonstração** | qualquer endereço com `?demo=1` | nenhum (dados só no navegador) |
 
@@ -70,8 +70,6 @@ O Cloudflare publica sozinho a cada envio ao GitHub ([wrangler.jsonc](wrangler.j
 
 Configuração no Cloudflare (*Compute → Workers & Pages → Create application → Import a repository*): repositório `pacientes`, *Project name* **`pacientes`** (igual ao `name` do `wrangler.jsonc`), *Build command* **vazio**, *Deploy command* `npx wrangler deploy`.
 
-O [netlify.toml](netlify.toml) só serve ao endereço antigo do Netlify e sai quando ele for desligado.
-
 ## Usar no celular como aplicativo
 
 - **Android (Chrome):** menu ⋮ → **Adicionar à tela inicial**;
@@ -99,5 +97,4 @@ O [netlify.toml](netlify.toml) só serve ao endereço antigo do Netlify e sai qu
 | `docs/BACKUP.md` | Como configurar, baixar e restaurar backups |
 | `wrangler.jsonc` / `.assetsignore` | Publicação no Cloudflare e o que fica de fora |
 | `_headers` | Cabeçalhos de segurança (Cloudflare) |
-| `netlify.toml` | Publicação no Netlify antigo (até ser desligado) |
 | `manifest.webmanifest`, `icon.svg` | Permite instalar na tela inicial |

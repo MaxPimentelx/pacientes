@@ -20,8 +20,6 @@ const PRINCIPAL = 'https://pacientes.chamados-fractal.workers.dev';
 const ORIGENS = [
   /^https:\/\/pacientes\.chamados-fractal\.workers\.dev$/,
   /^https:\/\/[a-z0-9-]+-pacientes\.chamados-fractal\.workers\.dev$/, // homologacao e prévias
-  /^https:\/\/timely-cannoli-9571b6\.netlify\.app$/,
-  /^https:\/\/(homologacao|deploy-preview-\d+)--timely-cannoli-9571b6\.netlify\.app$/,
   /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
 ];
 function cabecalhos(req: Request) {
