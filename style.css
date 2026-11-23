@@ -310,6 +310,7 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, .item:focus-visib
 
 .filtros { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .filtros select { width: 100%; }
+#filtro-hospital { grid-column: 1 / -1; }
 
 /* ---------- Internações, setores e tipo de registro ---------- */
 .secao-form { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px 14px; margin: 0 0 14px; min-width: 0; }

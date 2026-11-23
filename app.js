@@ -118,6 +118,7 @@
       data_entrada: i.data_entrada || null,
       motivo: i.motivo || '',
       cids_entrada: i.cids_entrada || [],
+      hospital: i.hospital || null,
       setor_entrada: i.setor_entrada || null,
       leito_entrada: i.leito_entrada || null,
       previsao_alta_inicial: i.previsao_alta_inicial || null,
@@ -137,7 +138,7 @@
     return Math.max(0, diasEntre(v.previsao_alta, hoje()));
   }
 
-  // Reinternação: entrada até 30 dias depois da alta anterior
+  // Readmissão: entrada até 30 dias depois da alta anterior (em qualquer hospital)
   function reinternacao(p, i) {
     const anteriores = ordenarInternacoes(p.internacoes)
       .filter(o => o.id !== i.id && o.data_baixa && o.data_baixa <= i.data_entrada);
@@ -145,6 +146,13 @@
     if (!anterior) return null;
     const dias = diasEntre(anterior.data_baixa, i.data_entrada);
     return dias <= DIAS_REINTERNACAO ? { dias, anterior } : null;
+  }
+
+  function textoReadmissao(reint, i) {
+    const ant = reint.anterior;
+    const outro = ant.hospital && i.hospital && ant.hospital !== i.hospital;
+    return `entrada ${plural(reint.dias, 'dia', 'dias')} após a alta de ${fmtData(ant.data_baixa)} da internação anterior`
+      + (!ant.hospital ? '' : outro ? `, em <b>outro hospital</b>: ${esc(ant.hospital)}` : `, no mesmo hospital`);
   }
 
   const textoSetor = (setor, leito) => setor ? `${setor}${leito ? ` · leito ${leito}` : ''}` : (leito ? `Leito ${leito}` : '');
@@ -449,6 +457,7 @@
     if (/aal2|insufficient_aal|assurance/i.test(m)) return 'Confirme a verificação em 2 etapas e tente de novo.';
     if (/internacoes_uma_aberta|uma internação aberta/i.test(m)) return 'Este paciente já tem uma internação em andamento. Registre a alta antes de abrir outra.';
     if (/setores_nome_key|duplicate key.*setores/i.test(m)) return 'Já existe um setor com esse nome.';
+    if (/hospitais_nome_unico|duplicate key.*hospitais/i.test(m)) return 'Já existe um hospital com esse nome.';
     if (/internacoes_previsao_apos_entrada/i.test(m)) return 'A previsão de alta não pode ser anterior à entrada.';
     if (/mime type|invalid_mime|not supported/i.test(m)) return 'Tipo de arquivo não aceito. Envie PDF, JPG ou PNG.';
     if (/payload too large|maximum allowed size|entity too large|413/i.test(m)) return 'Arquivo grande demais: o limite é 10 MB.';
@@ -549,7 +558,7 @@
       async listarPacientes() {
         return ok(await sb.from('pacientes')
           .select(`id, nome, data_nascimento, sexo, telefone, documento, observacoes, criado_em,
-            internacoes(id, data_entrada, motivo, cids_entrada, setor_atual, leito_atual, previsao_alta,
+            internacoes(id, data_entrada, motivo, cids_entrada, hospital, setor_atual, leito_atual, previsao_alta,
               pendencias_alta, data_baixa, tipo_alta, criado_em,
               evolucoes(data, status, descricao, cids, criado_em, anulada_em, tipo))`)
           .order('nome'));
@@ -613,6 +622,13 @@
       async salvarSetor(s) {
         if (s.id) return ok(await sb.from('setores').update({ nome: s.nome, ativo: s.ativo, ordem: s.ordem }).eq('id', s.id).select().single());
         return ok(await sb.from('setores').insert({ nome: s.nome, ordem: s.ordem ?? 100 }).select().single());
+      },
+
+      // --- Hospitais (edição só por administradores; regra no banco) ---
+      async listarHospitais() { return ok(await sb.from('hospitais').select('*').order('ordem').order('nome')); },
+      async salvarHospital(h) {
+        if (h.id) return ok(await sb.from('hospitais').update({ nome: h.nome, ativo: h.ativo, ordem: h.ordem }).eq('id', h.id).select().single());
+        return ok(await sb.from('hospitais').insert({ nome: h.nome, ordem: h.ordem ?? 100 }).select().single());
       }
     };
   }
@@ -698,6 +714,11 @@
       mem.setores = SETORES_PADRAO.map((nome, n) => ({ id: novoId(), nome, ordem: (n + 1) * 10, ativo: true }));
       gravar();
     }
+    if (!Array.isArray(mem.hospitais)) {
+      mem.hospitais = ['Hospital Exemplo Central', 'Hospital Exemplo Norte']
+        .map((nome, n) => ({ id: novoId(), nome, ordem: (n + 1) * 10, ativo: true }));
+      gravar();
+    }
 
     const comInternacoes = (p, comEvolucoes) => ({
       ...p,
@@ -706,10 +727,19 @@
         : { ...i })
     });
     const PESSOA = ['nome', 'data_nascimento', 'sexo', 'telefone', 'documento', 'observacoes'];
-    const ENTRADA = ['data_entrada', 'motivo', 'cids_entrada', 'setor_entrada', 'leito_entrada', 'previsao_alta_inicial'];
+    const ENTRADA = ['data_entrada', 'motivo', 'cids_entrada', 'hospital', 'setor_entrada', 'leito_entrada', 'previsao_alta_inicial'];
     const pegar = (obj, campos) => Object.fromEntries(campos.filter(c => c in obj).map(c => [c, obj[c]]));
 
+    // mesma regra do banco: hospital informado precisa estar na lista, ativo
+    function conferirHospital(nome, anterior) {
+      if (!nome || nome === anterior) return;
+      if (!mem.hospitais.some(h => h.ativo && h.nome === nome)) {
+        throw new Error('Hospital fora da lista de hospitais ativos. Escolha um hospital da lista.');
+      }
+    }
+
     function abrirInternacao(dados) {
+      conferirHospital(dados.hospital);
       if (mem.internacoes.some(o => o.paciente_id === dados.paciente_id && !o.data_baixa)) {
         throw new Error('Este paciente já tem uma internação em andamento. Registre a alta antes de abrir outra.');
       }
@@ -788,6 +818,7 @@
       async atualizarInternacao(id, dados) {
         const i = mem.internacoes.find(x => x.id === id);
         const novos = pegar(dados, ENTRADA);
+        conferirHospital(novos.hospital, i.hospital);
         if ((novos.previsao_alta_inicial || null) && novos.previsao_alta_inicial < (novos.data_entrada || i.data_entrada)) {
           throw new Error('A previsão de alta não pode ser anterior à entrada.');
         }
@@ -885,6 +916,17 @@
         if (s.id) { const x = mem.setores.find(y => y.id === s.id); Object.assign(x, { nome, ativo: s.ativo }); gravar(); return x; }
         const novo = { id: novoId(), nome, ordem: s.ordem ?? 100, ativo: true };
         mem.setores.push(novo); gravar(); return novo;
+      },
+      async listarHospitais() {
+        return mem.hospitais.slice().sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome, 'pt-BR'));
+      },
+      async salvarHospital(h) {
+        const nome = (h.nome || '').trim();
+        if (nome.length < 2) throw new Error('Informe o nome do hospital.');
+        if (mem.hospitais.some(x => x.id !== h.id && normalizar(x.nome) === normalizar(nome))) throw new Error('Já existe um hospital com esse nome.');
+        if (h.id) { const x = mem.hospitais.find(y => y.id === h.id); Object.assign(x, { nome, ativo: h.ativo }); gravar(); return x; }
+        const novo = { id: novoId(), nome, ordem: h.ordem ?? 100, ativo: true };
+        mem.hospitais.push(novo); gravar(); return novo;
       }
     };
   }
@@ -894,8 +936,8 @@
   // ------------------------------------------------------------------
   let db;
   const estado = {
-    pacientes: [], setores: [], selecionado: null, internacaoSel: null,
-    busca: '', filtro: '', filtroSetor: '', baixa: 'sem'
+    pacientes: [], setores: [], hospitais: [], selecionado: null, internacaoSel: null,
+    busca: '', filtro: '', filtroSetor: '', filtroHospital: '', baixa: 'sem'
   };
   let seletorEvolucao = null;
   let procedimentosEvolucao = null;
@@ -942,7 +984,7 @@
     $('#user-box').hidden = false;
     renderUsuario();
     iniciarVigiaInatividade();
-    await Promise.all([carregarPacientes(), carregarCid(), carregarSetores()]);
+    await Promise.all([carregarPacientes(), carregarCid(), carregarSetores(), carregarHospitais()]);
     rotear();
   }
 
@@ -1062,7 +1104,8 @@
     $('#form-alterar-senha').reset();
     $('#form-alterar-senha').hidden = !MODO_ONLINE;
     $('#sec-setores').hidden = !ehAdmin();
-    if (ehAdmin()) renderSetoresAdmin();
+    $('#sec-hospitais').hidden = !ehAdmin();
+    if (ehAdmin()) renderListasAdmin();
     dlgConta.querySelectorAll('.erro').forEach(e => { e.hidden = true; });
     dlgConta.showModal();
   }
@@ -1134,44 +1177,90 @@
     sel.innerHTML = opcoesSetor(atual, 'Todos os setores');
   }
 
-  function renderSetoresAdmin() {
-    $('#setores-lista').innerHTML = estado.setores.map(s => `
-      <li data-id="${esc(s.id)}" class="${s.ativo ? '' : 'inativo'}">
-        <input value="${esc(s.nome)}" maxlength="60" aria-label="Nome do setor">
-        <label class="chk"><input type="checkbox" ${s.ativo ? 'checked' : ''}> ativo</label>
-        <button type="button" class="btn btn-ghost btn-sm" data-acao="salvar-setor">Salvar</button>
-      </li>`).join('');
+  // --- Hospitais ---
+  async function carregarHospitais() {
+    try {
+      estado.hospitais = await db.listarHospitais();
+    } catch (e) {
+      console.warn('Hospitais indisponíveis:', e);
+      estado.hospitais = [];
+    }
+    preencherFiltroHospital();
   }
 
-  $('#setores-lista').addEventListener('click', async ev => {
-    const b = ev.target.closest('[data-acao=salvar-setor]');
-    if (!b) return;
-    const li = b.closest('li');
-    const s = estado.setores.find(x => String(x.id) === li.dataset.id);
-    const erro = $('#setores-erro');
-    erro.hidden = true;
-    try {
-      await db.salvarSetor({ ...s, nome: li.querySelector('input:not([type=checkbox])').value.trim(), ativo: li.querySelector('[type=checkbox]').checked });
-      await carregarSetores();
-      renderSetoresAdmin();
-      toast('Setor atualizado.');
-    } catch (e) { erro.textContent = msgErro(e); erro.hidden = false; }
-  });
+  const hospitaisAtivos = () => estado.hospitais.filter(h => h.ativo);
 
-  $('#form-setor-novo').addEventListener('submit', async ev => {
-    ev.preventDefault();
-    const erro = $('#setores-erro');
-    erro.hidden = true;
-    const nome = ev.target.elements.nome.value.trim();
-    try {
-      const ordem = Math.max(0, ...estado.setores.map(s => s.ordem || 0)) + 10;
-      await db.salvarSetor({ nome, ordem });
-      ev.target.reset();
-      await carregarSetores();
-      renderSetoresAdmin();
-      toast('Setor adicionado.');
-    } catch (e) { erro.textContent = msgErro(e); erro.hidden = false; }
-  });
+  // opções de hospital (inclui o valor atual mesmo se o hospital foi desativado)
+  function opcoesHospital(selecionado, rotuloVazio = '— selecione —') {
+    const nomes = hospitaisAtivos().map(h => h.nome);
+    if (selecionado && !nomes.includes(selecionado)) nomes.push(selecionado);
+    return `<option value="">${rotuloVazio}</option>` +
+      nomes.map(n => `<option value="${esc(n)}" ${n === selecionado ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  }
+
+  function preencherFiltroHospital() {
+    const sel = $('#filtro-hospital');
+    sel.innerHTML = opcoesHospital(estado.filtroHospital, 'Todos os hospitais');
+    sel.hidden = !estado.hospitais.length;
+  }
+
+  // --- Listas mantidas pelo administrador (setores e hospitais) ---
+  const LISTAS_ADMIN = {
+    setor: {
+      lista: '#setores-lista', form: '#form-setor-novo', erro: '#setores-erro', max: 60,
+      itens: () => estado.setores, salvar: x => db.salvarSetor(x), recarregar: () => carregarSetores(),
+      rotulo: 'setor', alterado: 'Setor atualizado.', adicionado: 'Setor adicionado.'
+    },
+    hospital: {
+      lista: '#hospitais-lista', form: '#form-hospital-novo', erro: '#hospitais-erro', max: 120,
+      itens: () => estado.hospitais, salvar: x => db.salvarHospital(x), recarregar: () => carregarHospitais(),
+      rotulo: 'hospital', alterado: 'Hospital atualizado.', adicionado: 'Hospital adicionado.'
+    }
+  };
+
+  function renderListaAdmin(cfg) {
+    const itens = cfg.itens();
+    $(cfg.lista).innerHTML = itens.length ? itens.map(s => `
+      <li data-id="${esc(s.id)}" class="${s.ativo ? '' : 'inativo'}">
+        <input value="${esc(s.nome)}" maxlength="${cfg.max}" aria-label="Nome do ${cfg.rotulo}">
+        <label class="chk"><input type="checkbox" ${s.ativo ? 'checked' : ''}> ativo</label>
+        <button type="button" class="btn btn-ghost btn-sm" data-acao="salvar-item">Salvar</button>
+      </li>`).join('') : `<li class="item-meta">Nenhum ${cfg.rotulo} cadastrado ainda.</li>`;
+  }
+
+  const renderListasAdmin = () => Object.values(LISTAS_ADMIN).forEach(renderListaAdmin);
+
+  for (const cfg of Object.values(LISTAS_ADMIN)) {
+    $(cfg.lista).addEventListener('click', async ev => {
+      const b = ev.target.closest('[data-acao=salvar-item]');
+      if (!b) return;
+      const li = b.closest('li');
+      const s = cfg.itens().find(x => String(x.id) === li.dataset.id);
+      const erro = $(cfg.erro);
+      erro.hidden = true;
+      try {
+        await cfg.salvar({ ...s, nome: li.querySelector('input:not([type=checkbox])').value.trim(), ativo: li.querySelector('[type=checkbox]').checked });
+        await cfg.recarregar();
+        renderListaAdmin(cfg);
+        toast(cfg.alterado);
+      } catch (e) { erro.textContent = msgErro(e); erro.hidden = false; }
+    });
+
+    $(cfg.form).addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const erro = $(cfg.erro);
+      erro.hidden = true;
+      const nome = ev.target.elements.nome.value.trim();
+      try {
+        const ordem = Math.max(0, ...cfg.itens().map(s => s.ordem || 0)) + 10;
+        await cfg.salvar({ nome, ordem });
+        ev.target.reset();
+        await cfg.recarregar();
+        renderListaAdmin(cfg);
+        toast(cfg.adicionado);
+      } catch (e) { erro.textContent = msgErro(e); erro.hidden = false; }
+    });
+  }
 
   // ------------------------------------------------------------------
   // Usuários do sistema (administrador). A regra vale no servidor: a função
@@ -1417,11 +1506,12 @@
 
   function renderLista() {
     const termo = normalizar(estado.busca);
-    const { filtro: f, filtroSetor: setor, baixa: b } = estado;
+    const { filtro: f, filtroSetor: setor, filtroHospital: hosp, baixa: b } = estado;
     const todos = estado.pacientes.map(p => { const v = visao(p); return { p, v, r: resumo(v) }; });
     const itens = todos
       .filter(({ v }) => b === 'todos' || (b === 'com' ? !!v.data_baixa : !v.data_baixa))
       .filter(({ v }) => !setor || (!v.data_baixa && v.setor_atual === setor))
+      .filter(({ v }) => !hosp || v.hospital === hosp)
       .filter(({ v, r }) => !termo || normalizar(v.nome).includes(termo) || normalizar(v.documento).includes(termo)
         || r.cids.some(c => c.toLowerCase().replace('.', '').startsWith(termo.replace('.', ''))))
       .filter(({ v, r }) => {
@@ -1449,10 +1539,10 @@
       <li>
         <button type="button" class="item ${p.id === estado.selecionado ? 'ativo' : ''} ${v.data_baixa ? 'baixado' : ''}" data-id="${esc(p.id)}">
           <span class="item-linha"><strong>${esc(v.nome)}</strong>${v.data_baixa ? pillBaixa(v) : pill(r.status)}</span>
-          ${!v.data_baixa && (v.setor_atual || v.leito_atual) ? `<span class="item-setor">${esc(textoSetor(v.setor_atual, v.leito_atual))}</span>` : ''}
+          ${v.hospital || (!v.data_baixa && (v.setor_atual || v.leito_atual)) ? `<span class="item-setor">${esc([v.hospital, !v.data_baixa ? textoSetor(v.setor_atual, v.leito_atual) : ''].filter(Boolean).join(' · '))}</span>` : ''}
           <span class="item-meta">Entrada: ${fmtData(v.data_entrada)} · ${v.data_baixa
             ? `${plural(diasEntre(v.data_entrada, v.data_baixa), 'dia', 'dias')} de internação`
-            : haQuanto(v.data_entrada)}${nInt > 1 ? ` · ${nInt}ª internação` : ''}</span>
+            : haQuanto(v.data_entrada)}${nInt > 1 ? ` · ${nInt}ª internação` : ''}${reinternacao(p, v.internacao) ? ' · <b>readmissão</b>' : ''}</span>
           ${!v.data_baixa && v.previsao_alta ? `<span class="item-meta ${atraso ? 'previsao-atrasada' : ''}">Previsão de alta: ${fmtData(v.previsao_alta)}${atraso ? ` · ${plural(atraso, 'dia', 'dias')} além do previsto` : ''}</span>` : ''}
           ${r.cids.length ? `<span class="item-meta" title="${esc(descCid(r.cids[0]))}">CID: <b>${esc(r.cids[0])}</b>${r.cids.length > 1 ? ` +${r.cids.length - 1}` : ''} ${esc(descCid(r.cids[0]))}</span>` : ''}
           <span class="item-meta">${r.total ? `Última evolução: ${fmtData(r.ultimaData)} · ${plural(r.total, 'registro', 'registros')}` : 'Nenhuma evolução registrada'}</span>
@@ -1718,6 +1808,7 @@
           ${internacoes.map(x => `
             <button type="button" role="tab" class="aba-int ${x.id === i.id ? 'ativa' : ''}" data-acao="ver-internacao" data-id="${esc(x.id)}" aria-selected="${x.id === i.id}">
               <b>${x.data_baixa ? `${fmtData(x.data_entrada)} – ${fmtData(x.data_baixa)}` : `Atual · desde ${fmtData(x.data_entrada)}`}</b>
+              ${x.hospital ? `<span>${esc(x.hospital)}</span>` : ''}
               <span>${x.data_baixa ? esc(ROTULO_ALTA[x.tipo_alta] || x.tipo_alta || 'Alta') : esc(textoSetor(x.setor_atual, x.leito_atual) || 'Em andamento')}</span>
             </button>`).join('')}
         </div>
@@ -1725,11 +1816,12 @@
 
       <div class="card">
         <div class="internacao-cabecalho">
-          <h3>Internação de ${fmtData(v.data_entrada)} ${v.data_baixa ? '<span class="pill s-baixa">Encerrada</span>' : '<span class="pill s-melhorando">Em andamento</span>'}</h3>
+          <h3>Internação de ${fmtData(v.data_entrada)}${v.hospital ? ` · ${esc(v.hospital)}` : ''} ${v.data_baixa ? '<span class="pill s-baixa">Encerrada</span>' : '<span class="pill s-melhorando">Em andamento</span>'}</h3>
           <button type="button" class="btn btn-ghost btn-sm" data-acao="editar-internacao">Editar internação</button>
         </div>
-        ${reint ? `<p class="aviso-reinternacao">Reinternação: entrada ${plural(reint.dias, 'dia', 'dias')} após a alta de ${fmtData(reint.anterior.data_baixa)} (internação anterior).</p>` : ''}
+        ${reint ? `<p class="aviso-reinternacao"><b>Readmissão:</b> ${textoReadmissao(reint, i)}.</p>` : ''}
         <dl class="info-grid">
+          <div class="span-all"><dt>Hospital</dt><dd>${esc(v.hospital) || '<span class="item-meta">não informado</span>'}</dd></div>
           <div><dt>Entrada</dt><dd>${fmtData(v.data_entrada)} <span class="item-meta">(${diasInternado >= 0 ? `${plural(diasInternado, 'dia', 'dias')}${v.data_baixa ? ' de internação' : ''}` : 'data futura'})</span></dd></div>
           <div><dt>${v.data_baixa ? 'Último setor' : 'Setor / leito atual'}</dt><dd>${esc(textoSetor(v.setor_atual, v.leito_atual)) || '—'}</dd></div>
           ${v.data_baixa
@@ -1954,7 +2046,7 @@
     nome: 'Nome', data_nascimento: 'Nascimento', sexo: 'Sexo', telefone: 'Telefone', documento: 'Documento',
     data_entrada: 'Data de entrada', motivo: 'Motivo da entrada', observacoes: 'Observações',
     cids_entrada: 'CID de entrada', data_baixa: 'Data da alta', tipo_alta: 'Tipo de alta',
-    setor_entrada: 'Setor de entrada', leito_entrada: 'Leito de entrada', previsao_alta_inicial: 'Previsão de alta (entrada)',
+    hospital: 'Hospital', setor_entrada: 'Setor de entrada', leito_entrada: 'Leito de entrada', previsao_alta_inicial: 'Previsão de alta (entrada)',
     data: 'Data', status: 'Situação', descricao: 'Evolução', cids: 'CIDs', cids_tipos: 'Classificação dos CIDs',
     procedimentos: 'Procedimentos', anulada_em: 'Anulada em', motivo_anulacao: 'Justificativa da anulação',
     tipo: 'Tipo de registro', setor: 'Setor', leito: 'Leito', intercorrencia: 'Intercorrência',
@@ -2050,7 +2142,7 @@
   let alvoDialogo = { pessoa: null, internacao: null };
 
   const CAMPOS_PESSOA = ['nome', 'data_nascimento', 'sexo', 'telefone', 'documento', 'observacoes'];
-  const CAMPOS_INTERNACAO = ['data_entrada', 'previsao_alta_inicial', 'setor_entrada', 'leito_entrada', 'motivo'];
+  const CAMPOS_INTERNACAO = ['data_entrada', 'previsao_alta_inicial', 'hospital', 'setor_entrada', 'leito_entrada', 'motivo'];
   const TITULOS = {
     'novo': 'Novo paciente', 'pessoa': 'Editar dados do paciente',
     'internacao': 'Editar dados da internação', 'nova-internacao': 'Nova internação'
@@ -2071,6 +2163,14 @@
     const dadosPessoa = pessoa || {};
     const dadosInt = internacao || { data_entrada: hoje() };
     formPac.querySelectorAll('.sel-setor').forEach(sel => { sel.innerHTML = opcoesSetor(dadosInt.setor_entrada); });
+    // hospital: obrigatório quando há hospitais cadastrados
+    const selHosp = formPac.elements.hospital;
+    const haHospitais = hospitaisAtivos().length > 0;
+    selHosp.innerHTML = opcoesHospital(dadosInt.hospital, haHospitais ? '— selecione —' : '— nenhum hospital cadastrado —');
+    // (na edição de internação antiga sem hospital, não trava as outras correções)
+    selHosp.required = haHospitais && (modo !== 'internacao' || !!dadosInt.hospital);
+    $('#hospital-obrigatorio').hidden = !selHosp.required;
+    $('#hospital-dica').hidden = haHospitais;
     for (const c of CAMPOS_PESSOA) formPac.elements[c].value = dadosPessoa[c] || '';
     for (const c of CAMPOS_INTERNACAO) formPac.elements[c].value = dadosInt[c] || '';
     seletorEntrada.definir(dadosInt.cids_entrada);
@@ -2149,6 +2249,7 @@
   $('#busca').addEventListener('input', ev => { estado.busca = ev.target.value; renderLista(); });
   $('#filtro-status').addEventListener('change', ev => { estado.filtro = ev.target.value; renderLista(); });
   $('#filtro-setor').addEventListener('change', ev => { estado.filtroSetor = ev.target.value; renderLista(); });
+  $('#filtro-hospital').addEventListener('change', ev => { estado.filtroHospital = ev.target.value; renderLista(); });
   document.querySelectorAll('input[name=filtro-baixa]').forEach(r =>
     r.addEventListener('change', ev => { estado.baixa = ev.target.value; renderLista(); }));
 
@@ -2255,6 +2356,7 @@
 
       <h2 class="rel-secao">Internação</h2>
       <table class="rel-ficha">
+        <tr><th>Hospital</th><td colspan="3">${esc(v.hospital) || 'Não informado'}</td></tr>
         <tr>
           <th>Entrada</th><td>${fmtData(v.data_entrada)}${v.setor_entrada ? `<div class="sub">${esc(textoSetor(v.setor_entrada, v.leito_entrada))}</div>` : ''}</td>
           <th>${v.data_baixa ? 'Alta' : 'Previsão de alta'}</th>
@@ -2267,7 +2369,7 @@
           <th>Situação</th><td><b>${esc(r.status || 'Sem evolução')}</b></td>
         </tr>
         ${!v.data_baixa ? `<tr><th>Pendências para a alta</th><td colspan="3">${v.pendencias_alta?.length ? v.pendencias_alta.map(esc).join('; ') : 'Nenhuma'}</td></tr>` : ''}
-        ${reint ? `<tr><th>Reinternação</th><td colspan="3">Entrada ${plural(reint.dias, 'dia', 'dias')} após a alta de ${fmtData(reint.anterior.data_baixa)}</td></tr>` : ''}
+        ${reint ? `<tr><th>Readmissão</th><td colspan="3">${textoReadmissao(reint, v.internacao)}</td></tr>` : ''}
         <tr><th>Motivo da entrada</th><td colspan="3" class="texto">${esc(v.motivo)}</td></tr>
         <tr><th>CID de entrada</th><td colspan="3">${listaCids(v.cids_entrada, tiposEntrada(v))}</td></tr>
         <tr><th>CID atual</th><td colspan="3">${listaCids(r.cids, tiposVig)}</td></tr>
@@ -2599,7 +2701,7 @@
     $('#user-email').innerHTML = u.nome
       ? esc(u.nome)
       : `${esc(u.email || '')} · <span class="sem-nome">definir nome</span>`;
-    $('#btn-meu-nome').title = `${u.email || ''} — minha conta (nome, senha${ehAdmin() ? ', usuários, setores' : ''})`;
+    $('#btn-meu-nome').title = `${u.email || ''} — minha conta (nome, senha${ehAdmin() ? ', usuários, setores, hospitais' : ''})`;
     $('#btn-sair').hidden = !MODO_ONLINE;
   }
 

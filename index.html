@@ -131,6 +131,9 @@
           <select id="filtro-setor" aria-label="Filtrar por setor">
             <option value="">Todos os setores</option>
           </select>
+          <select id="filtro-hospital" aria-label="Filtrar por hospital" hidden>
+            <option value="">Todos os hospitais</option>
+          </select>
         </div>
         <p class="contagem" id="contagem"></p>
       </div>
@@ -170,6 +173,10 @@
           <label>Data de entrada * <input type="date" name="data_entrada" required></label>
           <label>Previsão de alta <input type="date" name="previsao_alta_inicial">
             <small class="dica">Opcional. Pode ser atualizada a cada evolução.</small>
+          </label>
+          <label class="span-all">Hospital<span id="hospital-obrigatorio"> *</span>
+            <select name="hospital"><option value="">— selecione —</option></select>
+            <small class="dica" id="hospital-dica" hidden>A lista de hospitais é mantida pelo administrador (Minha conta → Hospitais).</small>
           </label>
           <label>Setor de entrada
             <select name="setor_entrada" class="sel-setor"><option value="">— não informado —</option></select>
@@ -226,6 +233,17 @@
         <p class="erro" id="setores-erro" hidden></p>
       </section>
 
+      <section id="sec-hospitais" class="conta-secao" hidden>
+        <h3>Hospitais (administrador)</h3>
+        <p class="dica">Lista oferecida na admissão e na readmissão do paciente. Hospitais desativados somem das opções, mas continuam no histórico.</p>
+        <ul class="setores-lista" id="hospitais-lista"></ul>
+        <form id="form-hospital-novo" class="setor-novo">
+          <input name="nome" minlength="2" maxlength="120" placeholder="Novo hospital (ex.: Hospital Santa Clara – Centro)" aria-label="Nome do novo hospital" required>
+          <button type="submit" class="btn btn-ghost btn-sm">Adicionar</button>
+        </form>
+        <p class="erro" id="hospitais-erro" hidden></p>
+      </section>
+
       <form id="form-alterar-senha" class="form conta-secao">
         <h3>Alterar senha</h3>
         <label>Nova senha <input type="password" name="senha" required autocomplete="new-password"></label>
@@ -243,7 +261,7 @@
   <dialog id="dlg-usuarios" aria-labelledby="usuarios-titulo">
     <div class="conta usuarios">
       <h2 id="usuarios-titulo">Usuários do sistema</h2>
-      <p class="dica"><b>Administrador:</b> cadastra e desativa usuários e mantém os setores. <b>Operador:</b> cadastra e acompanha pacientes.</p>
+      <p class="dica"><b>Administrador:</b> cadastra e desativa usuários e mantém os setores e hospitais. <b>Operador:</b> cadastra e acompanha pacientes.</p>
 
       <form id="form-usuario-novo" class="form conta-secao">
         <h3>Cadastrar usuário</h3>
