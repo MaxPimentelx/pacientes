@@ -110,6 +110,9 @@ h3 { font-size: 1.02rem; margin-bottom: 12px; }
 .anexo-acoes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
 .anexo-origem { display: flex; flex-wrap: wrap; gap: 8px; }
 .anexo-origem .btn { cursor: pointer; }
+/* "Tirar foto" abre a câmera só em celular/tablet; no computador seria igual a "Escolher arquivo" */
+.anexo-origem .so-toque { display: none; }
+@media (pointer: coarse) { .anexo-origem .so-toque { display: inline-flex; } }
 @media (max-width: 599px) {
   .anexos > li { flex-wrap: wrap; }
   .anexo-acoes { width: 100%; justify-content: flex-start; }
