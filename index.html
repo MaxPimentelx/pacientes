@@ -37,6 +37,24 @@
       <p class="erro" id="login-erro" hidden></p>
       <button class="btn btn-primary" type="submit">Entrar</button>
       <button class="btn-link" type="button" id="btn-esqueci">Esqueci minha senha</button>
+      <p class="login-rodape">Ainda não tem acesso?
+        <button class="btn-link" type="button" id="btn-solicitar">Solicitar acesso</button></p>
+    </form>
+
+    <!-- Pedido de acesso: não cria conta; o administrador analisa e cadastra -->
+    <form id="form-solicitar" class="card login-card" hidden>
+      <h1>Solicitar acesso</h1>
+      <p>Preencha seus dados. O administrador do sistema analisa o pedido e, se aprovado, entrega a você <b>pessoalmente</b> uma senha temporária.</p>
+      <label>Nome completo * <input name="nome" required minlength="2" maxlength="80" autocomplete="name"></label>
+      <label>E-mail * <input type="email" name="email" required maxlength="254" autocomplete="email"></label>
+      <label>Função / setor * <input name="funcao" required minlength="2" maxlength="80" placeholder="Ex.: Enfermeira – UTI adulto"></label>
+      <label>Mensagem para o administrador <textarea name="mensagem" rows="2" maxlength="300" placeholder="Opcional"></textarea></label>
+      <!-- campo-armadilha para robôs: pessoas não veem nem preenchem -->
+      <label class="armadilha" aria-hidden="true">Site <input name="site" tabindex="-1" autocomplete="off"></label>
+      <p class="sucesso" hidden></p>
+      <p class="erro" hidden></p>
+      <button class="btn btn-primary" type="submit">Enviar pedido</button>
+      <button class="btn btn-ghost" type="button" data-acao="voltar-login">Voltar ao login</button>
     </form>
 
     <!-- Recuperação: pede o e-mail e envia o link -->
@@ -263,8 +281,15 @@
       <h2 id="usuarios-titulo">Usuários do sistema</h2>
       <p class="dica"><b>Administrador:</b> cadastra e desativa usuários e mantém os setores e hospitais. <b>Operador:</b> cadastra e acompanha pacientes.</p>
 
+      <section id="sec-solicitacoes" class="conta-secao" hidden>
+        <h3>Pedidos de acesso <span class="pill s-piorando" id="solicitacoes-total"></span></h3>
+        <p class="dica">Pedidos feitos na tela de login. <b>Aprovar</b> preenche o cadastro abaixo (confira o papel antes de confirmar). <b>Recusar</b> encerra o pedido; a pessoa não é avisada automaticamente.</p>
+        <ul class="usuarios-lista" id="solicitacoes-lista"></ul>
+      </section>
+
       <form id="form-usuario-novo" class="form conta-secao">
         <h3>Cadastrar usuário</h3>
+        <p class="info-login" id="aprovando-info" hidden></p>
         <div class="grid2">
           <label class="span-all">Nome <input name="nome" maxlength="80" required placeholder="Ex.: Dra. Ana Souza – CRM 12345"></label>
           <label>E-mail <input type="email" name="email" required autocomplete="off"></label>

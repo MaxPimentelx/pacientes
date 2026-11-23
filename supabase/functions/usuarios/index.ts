@@ -6,10 +6,13 @@
 // 2 etapas confirmada (aal2) e usuário não desativado.
 //
 // Ações (POST, corpo JSON { acao, ... }):
+//   sem conta:         solicitar_acesso {nome, email, funcao, mensagem?}
+//                      (única ação sem sessão; não cria conta, só registra o pedido)
 //   qualquer usuário:  definir_minha_senha {senha}  (troca da senha temporária)
-//   administradores:   listar | criar {email, nome, papel} | papel {id, papel}
-//                      desativar {id} | reativar {id} | senha_temporaria {id}
-//                      remover_2_etapas {id}
+//   administradores:   listar (usuários + pedidos pendentes)
+//                      criar {email, nome, papel, solicitacao_id?} | recusar_solicitacao {solicitacao_id}
+//                      papel {id, papel} | desativar {id} | reativar {id}
+//                      senha_temporaria {id} | remover_2_etapas {id}
 import { createClient } from 'npm:@supabase/supabase-js@2.117.3';
 
 const PAPEIS = ['admin', 'operador'];
@@ -96,6 +99,49 @@ async function listarTodos(): Promise<Usuario[]> {
   return lista;
 }
 
+// Pedido de acesso de quem ainda não tem conta. Resposta sempre igual, exista
+// ou não a conta/pedido (não revela quais e-mails estão cadastrados).
+const LIMITE_PEDIDOS_HORA = 20;   // no sistema todo
+const LIMITE_PENDENTES = 50;      // fila máxima aguardando o administrador
+const EMAIL_OK = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+async function solicitarAcesso(corpo: Usuario): Promise<{ erro?: string }> {
+  if (String(corpo.site || '')) return {}; // campo-armadilha preenchido: robô
+  const nome = String(corpo.nome || '').trim().replace(/\s+/g, ' ');
+  const email = String(corpo.email || '').trim().toLowerCase();
+  const funcao = String(corpo.funcao || '').trim().replace(/\s+/g, ' ');
+  const mensagem = String(corpo.mensagem || '').trim() || null;
+  if (nome.length < 2 || nome.length > 80) return { erro: 'Informe o seu nome completo.' };
+  if (!EMAIL_OK.test(email) || email.length > 254) return { erro: 'Informe um e-mail válido.' };
+  if (funcao.length < 2 || funcao.length > 80) return { erro: 'Informe a sua função (ex.: Enfermeira – UTI).' };
+  if (mensagem && mensagem.length > 300) return { erro: 'A mensagem pode ter no máximo 300 caracteres.' };
+
+  const umaHora = new Date(Date.now() - 3600_000).toISOString();
+  const [{ count: naHora, error: e1 }, { count: pendentes, error: e2 }] = await Promise.all([
+    admin.from('solicitacoes_acesso').select('id', { count: 'exact', head: true }).gte('criado_em', umaHora),
+    admin.from('solicitacoes_acesso').select('id', { count: 'exact', head: true }).eq('situacao', 'pendente'),
+  ]);
+  if (e1 || e2) throw e1 || e2;
+  if ((naHora ?? 0) >= LIMITE_PEDIDOS_HORA || (pendentes ?? 0) >= LIMITE_PENDENTES) {
+    return { erro: 'Não foi possível receber o pedido agora. Tente mais tarde ou fale diretamente com o administrador.' };
+  }
+
+  // já tem conta: não registra (o administrador não precisa decidir nada)
+  if ((await listarTodos()).some((u) => (u.email || '').toLowerCase() === email)) return {};
+
+  const { error } = await admin.from('solicitacoes_acesso').insert({ nome, email, funcao, mensagem });
+  if (error && error.code !== '23505') throw error; // 23505: já há pedido pendente deste e-mail
+  return {};
+}
+
+async function listarPendentes() {
+  const { data, error } = await admin.from('solicitacoes_acesso')
+    .select('id, criado_em, nome, email, funcao, mensagem')
+    .eq('situacao', 'pendente').order('criado_em');
+  if (error) throw error;
+  return data || [];
+}
+
 async function encerrarSessoes(id: string) {
   const { error } = await admin.rpc('encerrar_sessoes', { p_usuario: id });
   if (error) throw error;
@@ -109,6 +155,21 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: h });
   if (req.method !== 'POST') return falha('Método não permitido.', 405);
 
+  let corpo: Usuario;
+  try { corpo = await req.json(); } catch { return falha('Requisição inválida.'); }
+  const acao = String(corpo?.acao || '');
+
+  // --- única ação sem sessão: pedido de acesso ---
+  if (acao === 'solicitar_acesso') {
+    try {
+      const r = await solicitarAcesso(corpo);
+      return r.erro ? falha(r.erro) : resposta({ ok: true });
+    } catch (e) {
+      console.error('solicitar_acesso', e);
+      return falha('Não foi possível enviar o pedido. Tente de novo em instantes.', 500);
+    }
+  }
+
   // --- quem está chamando? ---
   const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
   if (!token) return falha('Sessão não informada.', 401);
@@ -121,10 +182,6 @@ Deno.serve(async (req) => {
   const { data: du, error: eu } = await admin.auth.admin.getUserById(claims.sub);
   const eu_mesmo = du?.user;
   if (eu || !eu_mesmo || !ativo(eu_mesmo)) return falha('Usuário desativado.', 403);
-
-  let corpo: Usuario;
-  try { corpo = await req.json(); } catch { return falha('Requisição inválida.'); }
-  const acao = String(corpo?.acao || '');
 
   // Trilha: a linha é gravada ANTES da ação; se não der para registrar, nada é feito.
   const iniciar = async (alvo: { id?: string | null; email?: string | null }, acaoLog: string, detalhes: Record<string, unknown> = {}) => {
@@ -168,7 +225,23 @@ Deno.serve(async (req) => {
     if (papelDe(eu_mesmo) !== 'admin') return falha('Somente administradores podem gerenciar usuários.', 403);
 
     if (acao === 'listar') {
-      return resposta({ usuarios: (await listarTodos()).map(resumo) });
+      const [lista, solicitacoes] = await Promise.all([listarTodos(), listarPendentes()]);
+      return resposta({ usuarios: lista.map(resumo), solicitacoes });
+    }
+
+    if (acao === 'recusar_solicitacao') {
+      const sid = String(corpo.solicitacao_id || '').toLowerCase();
+      if (!/^[0-9a-f-]{36}$/.test(sid)) return falha('Pedido não informado.');
+      const { data: sol } = await admin.from('solicitacoes_acesso').select('id, email, nome, situacao').eq('id', sid).maybeSingle();
+      if (!sol || sol.situacao !== 'pendente') return falha('Este pedido já foi decidido ou não existe mais.', 409);
+      const fechar = await iniciar({ email: sol.email }, 'recusa_solicitacao', { solicitacao_id: sid, nome: sol.nome });
+      const { data: atual, error } = await admin.from('solicitacoes_acesso')
+        .update({ situacao: 'recusada', decidido_em: new Date().toISOString(), decidido_por: eu_mesmo.id, decidido_por_email: eu_mesmo.email })
+        .eq('id', sid).eq('situacao', 'pendente').select('id');
+      if (error) { await fechar('falhou', { motivo: error.message }); throw error; }
+      if (!atual?.length) { await fechar('falhou', { motivo: 'já decidido' }); return falha('Este pedido já foi decidido por outro administrador.', 409); }
+      await fechar('concluida');
+      return resposta({ ok: true });
     }
 
     if (acao === 'criar') {
@@ -177,7 +250,10 @@ Deno.serve(async (req) => {
       const papel = PAPEIS.includes(corpo.papel) ? corpo.papel : 'operador';
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return falha('Informe um e-mail válido.');
       if (!nome) return falha('Informe o nome do usuário.');
-      const fechar = await iniciar({ email }, 'cadastro', { papel, nome });
+      // aprovação de um pedido de acesso (opcional)
+      const sid = String(corpo.solicitacao_id || '').toLowerCase();
+      if (sid && !/^[0-9a-f-]{36}$/.test(sid)) return falha('Pedido inválido.');
+      const fechar = await iniciar({ email }, 'cadastro', { papel, nome, ...(sid ? { solicitacao_id: sid } : {}) });
       const senha = senhaTemporaria();
       const { data, error } = await admin.auth.admin.createUser({
         email, password: senha, email_confirm: true,
@@ -188,6 +264,13 @@ Deno.serve(async (req) => {
         await fechar('falhou', { motivo: error.message });
         if (/already|registered|exists/i.test(error.message)) return falha('Já existe um usuário com este e-mail.');
         throw error;
+      }
+      if (sid) {
+        const { error: es } = await admin.from('solicitacoes_acesso')
+          .update({ situacao: 'aprovada', decidido_em: new Date().toISOString(), decidido_por: eu_mesmo.id,
+                    decidido_por_email: eu_mesmo.email, usuario_id: data.user.id })
+          .eq('id', sid).eq('situacao', 'pendente');
+        if (es) console.error('solicitacao (aprovação):', es.message);
       }
       await fechar('concluida', {}, data.user.id);
       return resposta({ usuario: resumo(data.user), senha_temporaria: senha });

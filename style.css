@@ -563,3 +563,9 @@ dialog h2 { margin-bottom: 16px; }
   body > *:not(#impressao) { display: none !important; }
   #impressao { display: block !important; }
 }
+
+/* Solicitar acesso */
+.login-rodape { margin: 4px 0 0; text-align: center; font-size: .92rem; color: var(--muted, inherit); }
+.armadilha { position: absolute !important; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.solicitacao-msg { white-space: pre-wrap; }
+#btn-meu-nome.com-pendencia::after { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e5534b; margin-left: 6px; vertical-align: middle; }

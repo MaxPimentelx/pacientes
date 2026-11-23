@@ -762,18 +762,43 @@
       gravar();
     }
     const senhaDemo = () => 'Demo-' + Math.random().toString(36).slice(2, 8) + '#7Q';
+    if (!Array.isArray(mem.solicitacoes)) {
+      mem.solicitacoes = [{ id: novoId(), criado_em: agora(), nome: 'Pessoa de exemplo', email: 'pedido@exemplo.local',
+        funcao: 'Técnica de enfermagem – Enfermaria', mensagem: 'Comecei no plantão noturno.', situacao: 'pendente' }];
+      gravar();
+    }
 
     return {
       async sessao() { return usuarioDemo; },
       async gerenciarUsuarios(acao, d = {}) {
-        if (acao === 'listar') return { usuarios: mem.usuarios.map(u => ({ ...u })) };
+        if (acao === 'listar') {
+          return { usuarios: mem.usuarios.map(u => ({ ...u })), solicitacoes: mem.solicitacoes.filter(x => x.situacao === 'pendente').map(x => ({ ...x })) };
+        }
+        if (acao === 'solicitar_acesso') {
+          const email = String(d.email || '').trim().toLowerCase();
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Informe um e-mail válido.');
+          if (!mem.usuarios.some(u => u.email === email) && !mem.solicitacoes.some(x => x.situacao === 'pendente' && x.email === email)) {
+            mem.solicitacoes.push({ id: novoId(), criado_em: agora(), nome: d.nome.trim(), email, funcao: d.funcao.trim(), mensagem: d.mensagem || null, situacao: 'pendente' });
+            gravar();
+          }
+          return { ok: true };
+        }
+        if (acao === 'recusar_solicitacao') {
+          const x = mem.solicitacoes.find(y => y.id === d.solicitacao_id && y.situacao === 'pendente');
+          if (!x) throw new Error('Este pedido já foi decidido ou não existe mais.');
+          x.situacao = 'recusada'; gravar();
+          return { ok: true };
+        }
         if (acao === 'criar') {
           const email = String(d.email || '').trim().toLowerCase();
           if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Informe um e-mail válido.');
           if (!String(d.nome || '').trim()) throw new Error('Informe o nome do usuário.');
           if (mem.usuarios.some(u => u.email === email)) throw new Error('Já existe um usuário com este e-mail.');
           const u = { id: novoId(), email, nome: d.nome.trim(), papel: d.papel === 'admin' ? 'admin' : 'operador', ativo: true, criado_em: agora(), ultimo_acesso: null, tem_2_etapas: false, trocar_senha: true };
-          mem.usuarios.push(u); gravar();
+          mem.usuarios.push(u);
+          const sol = mem.solicitacoes.find(y => y.id === d.solicitacao_id && y.situacao === 'pendente');
+          if (sol) sol.situacao = 'aprovada';
+          gravar();
           return { usuario: { ...u }, senha_temporaria: senhaDemo() };
         }
         const u = mem.usuarios.find(x => x.id === d.id);
@@ -947,7 +972,7 @@
   // etapa: 'senha' | 'esqueci' | 'mfa-codigo' | 'mfa-cadastro' | 'nova-senha'
   const FORMS_ACESSO = {
     'senha': '#form-login', 'esqueci': '#form-esqueci', 'mfa-codigo': '#form-mfa-codigo',
-    'mfa-cadastro': '#form-mfa-cadastro', 'nova-senha': '#form-nova-senha'
+    'mfa-cadastro': '#form-mfa-cadastro', 'nova-senha': '#form-nova-senha', 'solicitar': '#form-solicitar'
   };
   function mostrarLogin(mensagem, etapa = 'senha') {
     pararVigiaInatividade();
@@ -986,6 +1011,7 @@
     iniciarVigiaInatividade();
     await Promise.all([carregarPacientes(), carregarCid(), carregarSetores(), carregarHospitais()]);
     rotear();
+    verificarPedidosDeAcesso();
   }
 
   // ------------------------------------------------------------------
@@ -1044,6 +1070,41 @@
     if (email) $('#form-esqueci').elements.email.value = email;
   });
   $('#form-esqueci [data-acao=voltar-login]').addEventListener('click', () => mostrarLogin());
+
+  // ------------------------------------------------------------------
+  // Solicitar acesso (sem conta): só registra o pedido para o administrador
+  // ------------------------------------------------------------------
+  $('#btn-solicitar').addEventListener('click', () => {
+    const form = $('#form-solicitar');
+    form.reset();
+    form.querySelector('[type=submit]').hidden = false;
+    mostrarLogin(null, 'solicitar');
+  });
+  $('#form-solicitar [data-acao=voltar-login]').addEventListener('click', () => mostrarLogin());
+  $('#form-solicitar').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const form = ev.target;
+    const erro = form.querySelector('.erro');
+    const sucesso = form.querySelector('.sucesso');
+    const botao = form.querySelector('[type=submit]');
+    erro.hidden = sucesso.hidden = true;
+    botao.disabled = true;
+    const campo = n => form.elements[n].value.trim();
+    try {
+      await db.gerenciarUsuarios('solicitar_acesso', {
+        nome: campo('nome'), email: campo('email'), funcao: campo('funcao'), mensagem: campo('mensagem'), site: form.elements.site.value
+      });
+      // mesma mensagem exista ou não a conta: não revela quais e-mails estão cadastrados
+      sucesso.textContent = 'Pedido enviado. O administrador vai analisar e, se aprovado, entregar a você pessoalmente uma senha temporária. Se você já tem conta, use "Esqueci minha senha".';
+      sucesso.hidden = false;
+      botao.hidden = true;
+    } catch (e) {
+      erro.textContent = msgErro(e);
+      erro.hidden = false;
+    } finally {
+      botao.disabled = false;
+    }
+  });
 
   $('#form-esqueci').addEventListener('submit', async ev => {
     ev.preventDefault();
@@ -1268,11 +1329,14 @@
   // ------------------------------------------------------------------
   const dlgUsuarios = $('#dlg-usuarios');
   let usuarios = [];
+  let solicitacoes = [];
+  let aprovando = null; // pedido sendo aprovado pelo formulário de cadastro
   const PAPEL_ROTULO = { admin: 'Administrador', operador: 'Operador' };
 
   async function abrirUsuarios() {
     dlgConta.close();
     $('#form-usuario-novo').reset();
+    cancelarAprovacao();
     $('#usuario-senha').hidden = true;
     dlgUsuarios.querySelectorAll('.erro').forEach(e => { e.hidden = true; });
     $('#usuarios-lista').innerHTML = '<li class="dica">Carregando…</li>';
@@ -1286,8 +1350,11 @@
     const erro = $('#usuarios-erro');
     erro.hidden = true;
     try {
-      usuarios = (await db.gerenciarUsuarios('listar')).usuarios || [];
+      const r = await db.gerenciarUsuarios('listar');
+      usuarios = r.usuarios || [];
+      solicitacoes = r.solicitacoes || [];
       renderUsuarios();
+      renderSolicitacoes();
     } catch (e) {
       $('#usuarios-lista').innerHTML = '';
       erro.textContent = 'Não foi possível carregar os usuários: ' + msgErro(e);
@@ -1327,6 +1394,81 @@
     }).join('') || '<li class="dica">Nenhum usuário.</li>';
   }
 
+  function renderSolicitacoes() {
+    $('#sec-solicitacoes').hidden = !solicitacoes.length;
+    $('#solicitacoes-total').textContent = solicitacoes.length;
+    $('#solicitacoes-lista').innerHTML = solicitacoes.map(x => `
+      <li class="usuario" data-sol="${esc(x.id)}">
+        <div class="usuario-info">
+          <b>${esc(x.nome)}</b>
+          <span class="item-meta">${esc(x.email)} · ${esc(x.funcao)} · pedido em ${fmtDataHora(x.criado_em)}</span>
+          ${x.mensagem ? `<span class="item-meta solicitacao-msg">“${esc(x.mensagem)}”</span>` : ''}
+        </div>
+        <div class="usuario-acoes">
+          <button type="button" class="btn btn-primary btn-sm" data-acao="aprovar">Aprovar…</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-acao="recusar">Recusar</button>
+        </div>
+      </li>`).join('');
+    atualizarAvisoPedidos(solicitacoes.length);
+  }
+
+  function cancelarAprovacao() {
+    aprovando = null;
+    $('#aprovando-info').hidden = true;
+    $('#form-usuario-novo [type=submit]').textContent = 'Cadastrar';
+  }
+
+  $('#solicitacoes-lista').addEventListener('click', async ev => {
+    const b = ev.target.closest('button[data-acao]');
+    if (!b) return;
+    const x = solicitacoes.find(y => y.id === b.closest('li').dataset.sol);
+    if (!x) return;
+    const erro = $('#usuarios-erro');
+    erro.hidden = true;
+    if (b.dataset.acao === 'aprovar') {
+      const form = $('#form-usuario-novo');
+      form.reset();
+      form.elements.nome.value = x.nome;
+      form.elements.email.value = x.email;
+      form.elements.papel.value = 'operador';
+      aprovando = x;
+      const info = $('#aprovando-info');
+      info.textContent = `Aprovando o pedido de ${x.nome} (${x.funcao}). Confira os dados e o papel e clique em "Aprovar e cadastrar".`;
+      info.hidden = false;
+      form.querySelector('[type=submit]').textContent = 'Aprovar e cadastrar';
+      form.scrollIntoView({ block: 'nearest' });
+      form.elements.papel.focus();
+      return;
+    }
+    if (!confirm(`Recusar o pedido de acesso de ${x.nome} (${x.email})? A pessoa não é avisada automaticamente.`)) return;
+    b.disabled = true;
+    try {
+      await db.gerenciarUsuarios('recusar_solicitacao', { solicitacao_id: x.id });
+      if (aprovando?.id === x.id) { $('#form-usuario-novo').reset(); cancelarAprovacao(); }
+      await carregarUsuarios();
+      toast('Pedido recusado.');
+    } catch (e) {
+      erro.textContent = msgErro(e);
+      erro.hidden = false;
+      await carregarUsuarios();
+    }
+  });
+
+  // aviso para o administrador: pedidos aguardando
+  function atualizarAvisoPedidos(n) {
+    const b = $('#btn-gerenciar-usuarios');
+    b.textContent = n ? `Gerenciar usuários (${n} ${n === 1 ? 'pedido' : 'pedidos'} de acesso)` : 'Gerenciar usuários';
+    $('#btn-meu-nome').classList.toggle('com-pendencia', n > 0);
+  }
+  async function verificarPedidosDeAcesso() {
+    if (!ehAdmin()) return;
+    try {
+      const n = ((await db.gerenciarUsuarios('listar')).solicitacoes || []).length;
+      atualizarAvisoPedidos(n);
+      if (n) toast(`${n} ${n === 1 ? 'pedido' : 'pedidos'} de acesso aguardando. Veja em Minha conta → Gerenciar usuários.`);
+    } catch (e) { console.warn('Pedidos de acesso indisponíveis:', e); }
+  }
+
   function mostrarSenhaTemporaria(email, senha) {
     const box = $('#usuario-senha');
     box.querySelector('[data-email]').textContent = email;
@@ -1356,9 +1498,11 @@
     botao.disabled = true;
     try {
       const r = await db.gerenciarUsuarios('criar', {
-        nome: form.elements.nome.value.trim(), email: form.elements.email.value.trim(), papel: form.elements.papel.value
+        nome: form.elements.nome.value.trim(), email: form.elements.email.value.trim(), papel: form.elements.papel.value,
+        ...(aprovando ? { solicitacao_id: aprovando.id } : {})
       });
       form.reset();
+      cancelarAprovacao();
       await carregarUsuarios();
       mostrarSenhaTemporaria(r.usuario.email, r.senha_temporaria);
       toast('Usuário cadastrado.');
